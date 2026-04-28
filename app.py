@@ -205,15 +205,17 @@ def save_aluno(db, data, aluno_id=None):
                              (data['turma_nome'], data.get('turno','')))
             turma_id = cur.lastrowid
     fields = ['nome','turno','data_nascimento','cpf','raca','sus','telefone',
-              'responsavel','endereco','cidade','cep','pcd','especificidade','apoio','obs','ativo']
+              'responsavel','endereco','cidade','cep','pcd','especificidade','apoio','obs']
     vals = {f: data.get(f) for f in fields}
     vals['turma_id'] = turma_id
     if aluno_id:
+        # Never overwrite ativo on edit — preserve current value
         sets = ', '.join([f"{k}=?" for k in vals])
         db.execute(f"UPDATE alunos SET {sets} WHERE id=?", list(vals.values()) + [aluno_id])
         db.execute("INSERT INTO historico (aluno_id, tipo, descricao) VALUES (?,?,?)",
                    (aluno_id, 'EDIÇÃO', 'Dados atualizados'))
     else:
+        vals['ativo'] = data.get('ativo', 1)
         cols = ', '.join(vals.keys())
         phs  = ', '.join(['?']*len(vals))
         cur  = db.execute(f"INSERT INTO alunos ({cols}) VALUES ({phs})", list(vals.values()))
@@ -625,7 +627,7 @@ async function salvarEdicao(){
     endereco:document.getElementById('e-end').value.trim()||null,
     cidade:document.getElementById('e-cidade').value.trim()||null,
     cep:document.getElementById('e-cep').value.trim()||null,
-    obs:document.getElementById('e-obs').value.trim()||null,ativo:1
+    obs:document.getElementById('e-obs').value.trim()||null
   });
   toast('Dados salvos!');fecharModal('modal-editar');renderLista();loadStats();loadTurmasList();
 }
