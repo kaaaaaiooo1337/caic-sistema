@@ -588,7 +588,7 @@ async function renderLista(){
       <span class="badge ${a.ativo?'badge-ativo':'badge-inativo'}">${a.ativo?'Ativo':'Inativo'}</span>
       <div class="aluno-btns">
         <button class="btn btn-edit" onclick="abrirEdicao(${a.id})">Editar</button>
-        ${a.ativo?`<button class="btn btn-danger" onclick="registrarSaida(${a.id},'${a.nome.replace(/'/g,"\\'")}')">Saída</button>`:''}
+        ${a.ativo?`<button class="btn btn-danger" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="registrarSaida(parseInt(this.dataset.id), this.dataset.nome)">Saída</button>`:''}
       </div>
     </div>`).join('');
 }
@@ -631,12 +631,19 @@ async function salvarEdicao(){
 }
 
 function renderTurmas(){
-  document.getElementById('turmas-grid').innerHTML=turmasCache.map(t=>`
-    <div class="turma-card" onclick="verTurma('${t.nome}',this)">
+  const grid = document.getElementById('turmas-grid');
+  grid.innerHTML=turmasCache.map((t,i)=>`
+    <div class="turma-card" data-idx="${i}">
       <div class="turma-card-nome">${t.nome}</div>
       <div class="turma-card-info">${t.turno||'—'}</div>
       <div class="turma-card-num">${t.total}</div>
     </div>`).join('');
+  grid.querySelectorAll('.turma-card').forEach(card=>{
+    card.addEventListener('click', function(){
+      const t = turmasCache[parseInt(this.dataset.idx)];
+      verTurma(t.nome, this);
+    });
+  });
   document.getElementById('turma-detalhe').style.display='none';
 }
 
@@ -699,7 +706,7 @@ async function renderFreqTurma(){
         <div class="aluno-det"><span style="color:var(--green);font-weight:600">${p}P</span> · <span style="color:var(--accent);font-weight:600">${f}F</span> · ${dias.length-p-f} sem registro</div>
       </div>
       <div style="text-align:right;min-width:48px"><div style="font-family:'DM Serif Display',serif;font-size:20px;color:${cor}">${pct}%</div></div>
-      <button class="btn btn-edit" onclick="abrirFreqAluno(${a.id},'${a.nome.replace(/'/g,"\\'")}')">Ver dias</button>
+      <button class="btn btn-edit" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="abrirFreqAluno(parseInt(this.dataset.id), this.dataset.nome)">Ver dias</button>
     </div>`;
   }));
   el.innerHTML=`<div class="card"><div class="card-title">${turma} · ${MESES[mes]} ${ano}</div>${rows.join('')}</div>`;
