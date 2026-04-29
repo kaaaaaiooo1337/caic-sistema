@@ -604,8 +604,14 @@ async function registrarSaida(id,nome){
 async function abrirEdicao(id){
   const a=await api('GET',`/alunos/${id}`);
   document.getElementById('e-id').value=id;
-  const map={nome:'e-nome',turma_nome:'e-turma',turno:'e-turno',data_nascimento:'e-nasc',cpf:'e-cpf',raca:'e-raca',sus:'e-sus',pcd:'e-pcd',especificidade:'e-espec',apoio:'e-apoio',responsavel:'e-resp',telefone:'e-tel',endereco:'e-end',cidade:'e-cidade',cep:'e-cep',obs:'e-obs'};
+  const map={nome:'e-nome',turma_nome:'e-turma',turno:'e-turno',data_nascimento:'e-nasc',cpf:'e-cpf',raca:'e-raca',sus:'e-sus',especificidade:'e-espec',apoio:'e-apoio',responsavel:'e-resp',telefone:'e-tel',endereco:'e-end',cidade:'e-cidade',cep:'e-cep',obs:'e-obs'};
   for(const[k,eid] of Object.entries(map)){const el=document.getElementById(eid);if(el)el.value=a[k]!=null?a[k]:'';}
+  // pcd must be string '0' or '1' for the select to match
+  document.getElementById('e-pcd').value = a.pcd ? '1' : '0';
+  // Show/hide espec and apoio fields based on pcd
+  const isPcd = a.pcd == 1;
+  document.getElementById('fg-espec').style.display = isPcd ? 'flex' : 'none';
+  document.getElementById('fg-apoio').style.display  = isPcd ? 'flex' : 'none';
   document.getElementById('modal-editar').classList.add('open');
 }
 
