@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+##!/usr/bin/env python3
 
 import os
 from datetime import datetime
@@ -24,14 +24,14 @@ def query(sql, params=None, one=False):
     sql = sql.replace('?', '%s')
     cur.execute(sql, params or [])
 
-    if sql.strip().upper().startswith("SELECT"):
+    if cur.description:  # detecta SELECT corretamente
         rows = cur.fetchall()
         cur.close()
         return rows[0] if one and rows else rows
-
-    db.commit()
-    cur.close()
-    return None
+    else:
+        db.commit()
+        cur.close()
+        return None
 
 # ── INIT DB ─────────────────────────────────────────
 
@@ -103,13 +103,13 @@ def alunos():
 
     return jsonify({'ok': True})
 
-# EXCLUIR ALUNO ✅
+# EXCLUIR ALUNO
 @app.route('/api/alunos/<int:id>', methods=['DELETE'])
 def deletar_aluno(id):
     query("DELETE FROM alunos WHERE id=?", [id])
     return jsonify({'ok': True})
 
-# FREQUÊNCIA ✅
+# FREQUÊNCIA
 @app.route('/api/frequencia', methods=['POST'])
 def set_freq():
     d = request.json
