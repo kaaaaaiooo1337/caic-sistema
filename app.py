@@ -13,7 +13,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db():
     if 'db' not in g:
-        g.db = psycopg2.connect(DATABASE_URL)
+        g.db = psycopg2.connect(
+            DATABASE_URL,
+            sslmode='require'  # 🔥 CORREÇÃO AQUI
+        )
     return g.db
 
 def query(sql, params=None, one=False):
@@ -73,7 +76,6 @@ def init_db():
 def home():
     return render_template('index.html')
 
-# 🔥 ROTA DEBUG (NOVA)
 @app.route('/debug')
 def debug():
     return str(DATABASE_URL)
