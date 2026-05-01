@@ -8,8 +8,7 @@ Deploy: Render.com
 import os, json, re
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string, g
-import psycopg2
-import psycopg2.extras
+import psycopg
 
 app = Flask(__name__)
 
@@ -19,7 +18,7 @@ DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
 def get_db():
     if 'db' not in g:
-        g.db = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        g.db = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row)
     return g.db
 
 @app.teardown_appcontext
@@ -29,7 +28,7 @@ def close_db(e=None):
         db.close()
 
 def init_db():
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL)
     cur  = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS turmas (
