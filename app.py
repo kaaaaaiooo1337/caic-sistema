@@ -160,8 +160,8 @@ def stats():
         'total_turmas': q("SELECT COUNT(*) as n FROM turmas", db=db, one=True)['n'],
         'entradas_mes': q("SELECT COUNT(*) as n FROM historico WHERE tipo='ENTRADA' AND data>=%s AND data<=%s", (mes_ini, mes_fim), one=True, db=db)['n'],
         'saidas_mes':   q("SELECT COUNT(*) as n FROM historico WHERE tipo='SAÍDA' AND data>=%s AND data<=%s", (mes_ini, mes_fim), one=True, db=db)['n'],
-        'matutino':     q("SELECT COUNT(*) as n FROM alunos a LEFT JOIN turmas t ON a.turma_id=t.id WHERE a.ativo=1 AND (a.turno ILIKE '%MAT%' OR t.turno ILIKE '%MAT%')", db=db, one=True)['n'],
-        'vespertino':   q("SELECT COUNT(*) as n FROM alunos a LEFT JOIN turmas t ON a.turma_id=t.id WHERE a.ativo=1 AND (a.turno ILIKE '%VES%' OR t.turno ILIKE '%VES%')", db=db, one=True)['n'],
+        'matutino':     q("SELECT COUNT(*) as n FROM alunos a LEFT JOIN turmas t ON a.turma_id=t.id WHERE a.ativo=1 AND (a.turno ILIKE '%%MAT%%' OR t.turno ILIKE '%%MAT%%')", db=db, one=True)['n'],
+        'vespertino':   q("SELECT COUNT(*) as n FROM alunos a LEFT JOIN turmas t ON a.turma_id=t.id WHERE a.ativo=1 AND (a.turno ILIKE '%%VES%%' OR t.turno ILIKE '%%VES%%')", db=db, one=True)['n'],
     })
 
 @app.route('/api/turmas')
