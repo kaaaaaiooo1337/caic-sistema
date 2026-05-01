@@ -32,7 +32,7 @@ def query(sql, params=None, one=False):
             return None
 
     except Exception as e:
-        print("ERRO SQL:", e)  # ← isso vai aparecer no log do Render
+        print("ERRO SQL:", e)
         return None
 
     finally:
@@ -72,6 +72,11 @@ def init_db():
 @app.route('/')
 def home():
     return render_template('index.html')
+
+# 🔥 ROTA DEBUG (NOVA)
+@app.route('/debug')
+def debug():
+    return str(DATABASE_URL)
 
 @app.route('/api/alunos', methods=['GET','POST'])
 def alunos():
