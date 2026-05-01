@@ -15,22 +15,46 @@
 
 <p id="msg"></p>
 
-<h2>Lista de alunos</h2>
+<h2>Alunos</h2>
 
-<ul id="lista"></ul>
+<table border="1">
+    <thead>
+        <tr>
+            <th>Nome</th>
+            <th>Turma</th>
+            <th>Presente</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody id="tabela"></tbody>
+</table>
 
 <script>
 async function carregar() {
     const res = await fetch('/api/alunos');
     const dados = await res.json();
 
-    const lista = document.getElementById('lista');
-    lista.innerHTML = '';
+    const tabela = document.getElementById('tabela');
+    tabela.innerHTML = '';
+
+    const hoje = new Date().toISOString().slice(0,10);
 
     dados.forEach(a => {
-        const li = document.createElement('li');
-        li.textContent = a.nome + " - " + (a.turma_nome || '');
-        lista.appendChild(li);
+        const tr = document.createElement('tr');
+
+        tr.innerHTML = `
+            <td>${a.nome}</td>
+            <td>${a.turma_nome || ''}</td>
+            <td>
+                <button onclick="marcar(${a.id},1)">✔️</button>
+                <button onclick="marcar(${a.id},0)">❌</button>
+            </td>
+            <td>
+                <button onclick="remover(${a.id})">Excluir</button>
+            </td>
+        `;
+
+        tabela.appendChild(tr);
     });
 }
 
@@ -38,10 +62,7 @@ async function adicionar() {
     const nome = document.getElementById('nome').value;
     const turma = document.getElementById('turma').value;
 
-    if (!nome) {
-        alert("Digite o nome");
-        return;
-    }
+    if (!nome) return alert("Digite o nome");
 
     await fetch('/api/alunos', {
         method: 'POST',
@@ -49,17 +70,35 @@ async function adicionar() {
         body: JSON.stringify({ nome: nome, turma_nome: turma })
     });
 
-    // limpa campos
     document.getElementById('nome').value = '';
     document.getElementById('turma').value = '';
-
-    // mensagem
-    document.getElementById('msg').textContent = "Aluno salvo com sucesso ✅";
+    document.getElementById('msg').textContent = "Aluno salvo ✅";
 
     carregar();
 }
 
-// carrega automaticamente ao abrir
+async function remover(id) {
+    await fetch('/api/alunos/' + id, { method: 'DELETE' });
+    carregar();
+}
+
+async function marcar(id, presenca) {
+    const hoje = new Date().toISOString().slice(0,10);
+
+    await fetch('/api/frequencia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            aluno_id: id,
+            data: hoje,
+            presente: presenca
+        })
+    });
+
+    carregar();
+}
+
+// auto load
 carregar();
 </script>
 
