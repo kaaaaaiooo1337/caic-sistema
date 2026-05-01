@@ -129,6 +129,25 @@ def save_aluno(db, data, aluno_id=None):
 
 # ── API ────────────────────────────────────────────────────────────────
 
+@app.route('/api/debug')
+def debug():
+    import traceback
+    result = {'DATABASE_URL_set': bool(DATABASE_URL), 'DATABASE_URL_preview': DATABASE_URL[:40] + '...' if len(DATABASE_URL) > 40 else DATABASE_URL}
+    try:
+        conn = psycopg.connect(DATABASE_URL, sslmode='require')
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM alunos")
+        result['alunos_count'] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM turmas")
+        result['turmas_count'] = cur.fetchone()[0]
+        result['conexao'] = 'OK'
+        conn.close()
+    except Exception as e:
+        result['conexao'] = 'ERRO'
+        result['erro'] = str(e)
+        result['traceback'] = traceback.format_exc()
+    return jsonify(result)
+
 @app.route('/api/stats')
 def stats():
     db   = get_db()
