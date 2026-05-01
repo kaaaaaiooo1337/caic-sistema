@@ -1,7 +1,6 @@
-##!/usr/bin/env python3
+#!/usr/bin/env python3
 
 import os
-from datetime import datetime
 from flask import Flask, request, jsonify, render_template, g
 import psycopg2
 import psycopg2.extras
@@ -10,7 +9,7 @@ app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# ── DATABASE ─────────────────────────────────────────
+# ── DATABASE ─────────────────────────
 
 def get_db():
     if 'db' not in g:
@@ -18,29 +17,34 @@ def get_db():
     return g.db
 
 def query(sql, params=None, one=False):
-    db = get_db()
-    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    sql = sql.replace('?', '%s')
-    cur.execute(sql, params or [])
+    try:
+        sql = sql.replace('?', '%s')
+        cur.execute(sql, params or [])
 
-    if cur.description:  # detecta SELECT corretamente
-        rows = cur.fetchall()
-        cur.close()
-        return rows[0] if one and rows else rows
-    else:
-        db.commit()
-        cur.close()
+        if cur.description:
+            rows = cur.fetchall()
+            return rows[0] if one and rows else rows
+        else:
+            conn.commit()
+            return None
+
+    except Exception as e:
+        print("ERRO SQL:", e)  # ← isso vai aparecer no log do Render
         return None
 
-# ── INIT DB ─────────────────────────────────────────
+    finally:
+        cur.close()
+
+# ── INIT DB ─────────────────────────
 
 def init_db():
     query("""
     CREATE TABLE IF NOT EXISTS turmas (
         id SERIAL PRIMARY KEY,
-        nome TEXT UNIQUE NOT NULL,
-        turno TEXT
+        nome TEXT UNIQUE NOT NULL
     );
     """)
 
@@ -49,10 +53,7 @@ def init_db():
         id SERIAL PRIMARY KEY,
         nome TEXT NOT NULL,
         turma_id INTEGER REFERENCES turmas(id),
-        turno TEXT,
-        telefone TEXT,
-        ativo INTEGER DEFAULT 1,
-        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        telefone TEXT
     );
     """)
 
@@ -66,23 +67,21 @@ def init_db():
     );
     """)
 
-# ── ROTAS ─────────────────────────────────────────
+# ── ROTAS ─────────────────────────
 
 @app.route('/')
 def home():
     return render_template('index.html')
 
-# LISTAR / CRIAR ALUNOS
 @app.route('/api/alunos', methods=['GET','POST'])
 def alunos():
     if request.method == 'GET':
-        rows = query("""
+        return jsonify(query("""
             SELECT a.*, t.nome as turma_nome
             FROM alunos a
             LEFT JOIN turmas t ON a.turma_id=t.id
             ORDER BY a.nome
-        """)
-        return jsonify(rows)
+        """) or [])
 
     data = request.json
 
@@ -97,19 +96,17 @@ def alunos():
             turma_id = t['id']
 
     query("""
-    INSERT INTO alunos (nome, turma_id, turno, telefone)
-    VALUES (?, ?, ?, ?)
-    """, [data['nome'], turma_id, data.get('turno'), data.get('telefone')])
+    INSERT INTO alunos (nome, turma_id, telefone)
+    VALUES (?, ?, ?)
+    """, [data['nome'], turma_id, data.get('telefone')])
 
     return jsonify({'ok': True})
 
-# EXCLUIR ALUNO
 @app.route('/api/alunos/<int:id>', methods=['DELETE'])
 def deletar_aluno(id):
     query("DELETE FROM alunos WHERE id=?", [id])
     return jsonify({'ok': True})
 
-# FREQUÊNCIA
 @app.route('/api/frequencia', methods=['POST'])
 def set_freq():
     d = request.json
@@ -121,9 +118,8 @@ def set_freq():
     """, [d['aluno_id'], d['data'], d['presente']])
     return jsonify({'ok': True})
 
-# ── START ─────────────────────────────────────────
+# ── START ─────────────────────────
 
 if __name__ == '__main__':
     init_db()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run()
