@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sistema CAIC</title>
+</head>
+<body>
+
+<h1>📚 Sistema CAIC</h1>
+
+<h2>Adicionar aluno</h2>
+<input id="nome" placeholder="Nome">
+<input id="turma" placeholder="Turma">
+<button onclick="adicionar()">Salvar</button>
+
+<h2>Lista de alunos</h2>
+<button onclick="carregar()">Atualizar</button>
+
+<ul id="lista"></ul>
+
+<script>
+async function carregar() {
+    const res = await fetch('/api/alunos');
+    const dados = await res.json();
+
+    const lista = document.getElementById('lista');
+    lista.innerHTML = '';
+
+    dados.forEach(a => {
+        const li = document.createElement('li');
+        li.textContent = a.nome + " - " + (a.turma_nome || '');
+        lista.appendChild(li);
+    });
+}
+
+async function adicionar() {
+    const nome = document.getElementById('nome').value;
+    const turma = document.getElementById('turma').value;
+
+    await fetch('/api/alunos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: nome, turma_nome: turma })
+    });
+
+    carregar();
+}
+</script>
+
+</body>
+</html>
