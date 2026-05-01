@@ -72,6 +72,7 @@ def init_db():
 def home():
     return render_template('index.html')
 
+# LISTAR / CRIAR ALUNOS
 @app.route('/api/alunos', methods=['GET','POST'])
 def alunos():
     if request.method == 'GET':
@@ -100,6 +101,24 @@ def alunos():
     VALUES (?, ?, ?, ?)
     """, [data['nome'], turma_id, data.get('turno'), data.get('telefone')])
 
+    return jsonify({'ok': True})
+
+# EXCLUIR ALUNO ✅
+@app.route('/api/alunos/<int:id>', methods=['DELETE'])
+def deletar_aluno(id):
+    query("DELETE FROM alunos WHERE id=?", [id])
+    return jsonify({'ok': True})
+
+# FREQUÊNCIA ✅
+@app.route('/api/frequencia', methods=['POST'])
+def set_freq():
+    d = request.json
+    query("""
+        INSERT INTO frequencias (aluno_id, data, presente)
+        VALUES (?, ?, ?)
+        ON CONFLICT(aluno_id, data)
+        DO UPDATE SET presente=EXCLUDED.presente
+    """, [d['aluno_id'], d['data'], d['presente']])
     return jsonify({'ok': True})
 
 # ── START ─────────────────────────────────────────
