@@ -99,6 +99,10 @@ def init_db():
 
 # ── ROTAS ─────────────────────────────────────────
 
+@app.route('/')
+def home():
+    return "Sistema rodando 🚀"
+
 @app.route('/api/stats')
 def stats():
     agora = datetime.now()
@@ -106,13 +110,13 @@ def stats():
     mes_fim = f"{agora.year}-{agora.month:02d}-31"
 
     return jsonify({
-        'total_ativos': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1", fetch=True)[0]['c'],
-        'total_pcd': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND pcd=1", fetch=True)[0]['c'],
-        'total_turmas': query("SELECT COUNT(*) as c FROM turmas", fetch=True)[0]['c'],
-        'entradas_mes': query("SELECT COUNT(*) as c FROM historico WHERE tipo='ENTRADA' AND data>=? AND data<=?", [mes_ini, mes_fim], True)[0]['c'],
-        'saidas_mes': query("SELECT COUNT(*) as c FROM historico WHERE tipo='SAÍDA' AND data>=? AND data<=?", [mes_ini, mes_fim], True)[0]['c'],
-        'matutino': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND turno ILIKE '%MAT%'", fetch=True)[0]['c'],
-        'vespertino': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND turno ILIKE '%VES%'", fetch=True)[0]['c'],
+        'total_ativos': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1")[0]['c'],
+        'total_pcd': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND pcd=1")[0]['c'],
+        'total_turmas': query("SELECT COUNT(*) as c FROM turmas")[0]['c'],
+        'entradas_mes': query("SELECT COUNT(*) as c FROM historico WHERE tipo='ENTRADA' AND data>=? AND data<=?", [mes_ini, mes_fim])[0]['c'],
+        'saidas_mes': query("SELECT COUNT(*) as c FROM historico WHERE tipo='SAÍDA' AND data>=? AND data<=?", [mes_ini, mes_fim])[0]['c'],
+        'matutino': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND turno ILIKE '%MAT%'")[0]['c'],
+        'vespertino': query("SELECT COUNT(*) as c FROM alunos WHERE ativo=1 AND turno ILIKE '%VES%'")[0]['c'],
     })
 
 @app.route('/api/turmas')
@@ -121,7 +125,7 @@ def turmas():
         SELECT t.*, COUNT(a.id) as total
         FROM turmas t LEFT JOIN alunos a ON a.turma_id=t.id AND a.ativo=1
         GROUP BY t.id ORDER BY t.nome
-    """, fetch=True)
+    """)
     return jsonify(rows)
 
 @app.route('/api/alunos', methods=['GET','POST'])
@@ -131,19 +135,19 @@ def alunos():
             SELECT a.*, t.nome as turma_nome, t.turno as turma_turno
             FROM alunos a LEFT JOIN turmas t ON a.turma_id=t.id
             ORDER BY t.nome, a.nome
-        """, fetch=True)
+        """)
         return jsonify(rows)
 
     data = request.json
 
     turma_id = None
     if data.get('turma_nome'):
-        t = query("SELECT id FROM turmas WHERE nome=?", [data['turma_nome']], True)
+        t = query("SELECT id FROM turmas WHERE nome=?", [data['turma_nome']], one=True)
         if t:
             turma_id = t['id']
         else:
             query("INSERT INTO turmas (nome, turno) VALUES (?,?)", [data['turma_nome'], data.get('turno','')])
-            t = query("SELECT id FROM turmas WHERE nome=?", [data['turma_nome']], True)
+            t = query("SELECT id FROM turmas WHERE nome=?", [data['turma_nome']], one=True)
             turma_id = t['id']
 
     query("""
@@ -170,7 +174,7 @@ def historico():
         SELECT h.*, a.nome as aluno_nome FROM historico h
         LEFT JOIN alunos a ON h.aluno_id=a.id
         ORDER BY h.data DESC LIMIT 100
-    """, fetch=True)
+    """)
     return jsonify(rows)
 
 # ── START ─────────────────────────────────────────
