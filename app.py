@@ -15,7 +15,7 @@ def get_db():
     if 'db' not in g:
         g.db = psycopg2.connect(
             DATABASE_URL,
-            sslmode='require'  # 🔥 CORREÇÃO AQUI
+            sslmode='require'
         )
     return g.db
 
@@ -127,6 +127,9 @@ def set_freq():
 
 # ── START ─────────────────────────
 
-if __name__ == '__main__':
+# 🔥 GARANTE QUE O BANCO INICIALIZA NO RENDER
+with app.app_context():
     init_db()
+
+if __name__ == '__main__':
     app.run()
