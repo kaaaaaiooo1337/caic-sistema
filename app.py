@@ -7,10 +7,15 @@ Deploy: Render.com
 
 import os, json, re
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string, g
+from flask import Flask, request, jsonify, render_template_string, g, session, redirect, url_for
 import psycopg
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'caic-darcy-ribeiro-2024')
+
+# Senhas — altere nas variáveis de ambiente do Render
+SENHA_ADMIN    = os.environ.get('SENHA_ADMIN', 'caic2024')      # secretaria
+SENHA_PROFESSOR = os.environ.get('SENHA_PROFESSOR', 'prof2024') # professores
 
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
@@ -129,7 +134,112 @@ def save_aluno(db, data, aluno_id=None):
 
 # ── API ────────────────────────────────────────────────────────────────
 
+
+# ── AUTENTICAÇÃO ───────────────────────────────────────────────────────
+
+LOGIN_HTML = r"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CAIC — Acesso</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--ink:#1a1614;--ink2:#4a4540;--ink3:#8a847e;--paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;--accent:#c8602a;--accent-bg:#fdf2ec;--green:#2a6b4a;--radius:14px;--radius-sm:10px}
+body{font-family:'DM Sans',sans-serif;background:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+.box{background:var(--paper);border-radius:var(--radius);padding:2.5rem 2rem;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.logo{font-family:'DM Serif Display',serif;font-size:26px;color:var(--ink);letter-spacing:-0.5px;margin-bottom:4px}
+.logo em{font-style:italic;color:var(--accent)}
+.sub{font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2rem}
+.tabs{display:flex;gap:4px;background:var(--paper2);border-radius:var(--radius-sm);padding:4px;margin-bottom:1.5rem}
+.tab-btn{flex:1;padding:8px;border-radius:8px;border:none;background:transparent;font-size:13px;font-weight:500;cursor:pointer;color:var(--ink3);font-family:'DM Sans',sans-serif;transition:all .15s}
+.tab-btn.active{background:var(--paper);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.fg{display:flex;flex-direction:column;gap:5px;margin-bottom:1rem}
+label{font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.5px}
+input{width:100%;padding:11px 14px;border:1px solid var(--paper3);border-radius:var(--radius-sm);background:var(--paper2);color:var(--ink);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;transition:border-color .15s}
+input:focus{border-color:var(--accent);background:var(--paper)}
+.btn-login{width:100%;padding:13px;border-radius:var(--radius-sm);background:var(--ink);color:var(--paper);border:none;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:.5rem;transition:all .15s}
+.btn-login:hover{background:#4a4540}
+.btn-login:active{transform:scale(.98)}
+.erro{background:#fdf2ec;border:1px solid #c8602a;border-radius:var(--radius-sm);padding:.75rem 1rem;font-size:13px;color:#c8602a;margin-bottom:1rem;display:none}
+.erro.show{display:block}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">CAIC <em>Darcy Ribeiro</em></div>
+  <div class="sub">Ilhéus · Bahia</div>
+  <div class="tabs">
+    <button class="tab-btn active" onclick="setTipo('admin',this)">Secretaria</button>
+    <button class="tab-btn" onclick="setTipo('professor',this)">Professor</button>
+  </div>
+  <div class="erro" id="erro">Senha incorreta. Tente novamente.</div>
+  <form method="POST" action="/login">
+    <input type="hidden" name="tipo" id="tipo-input" value="admin"/>
+    <div class="fg">
+      <label>Senha</label>
+      <input type="password" name="senha" placeholder="Digite a senha" autofocus/>
+    </div>
+    <button type="submit" class="btn-login">Entrar</button>
+  </form>
+</div>
+<script>
+function setTipo(tipo,el){
+  document.getElementById('tipo-input').value=tipo;
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+}
+const p=new URLSearchParams(window.location.search);
+if(p.get('erro')==='1'){document.getElementById('erro').classList.add('show');}
+if(p.get('tipo')==='professor'){
+  document.getElementById('tipo-input').value='professor';
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>{b.classList.toggle('active',i===1);});
+}
+</script>
+</body>
+</html>"""
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'POST':
+        tipo  = request.form.get('tipo','admin')
+        senha = request.form.get('senha','')
+        if tipo == 'admin' and senha == SENHA_ADMIN:
+            session['perfil'] = 'admin'
+            return redirect('/')
+        elif tipo == 'professor' and senha == SENHA_PROFESSOR:
+            session['perfil'] = 'professor'
+            return redirect('/professor')
+        else:
+            return redirect(f'/login?erro=1&tipo={tipo}')
+    return render_template_string(LOGIN_HTML)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/login')
+
+def requer_admin(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get('perfil') != 'admin':
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated
+
+def requer_login(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get('perfil') not in ('admin','professor'):
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated
+
 @app.route('/api/stats')
+@requer_login
 def stats():
     db   = get_db()
     agora = datetime.now()
@@ -146,6 +256,7 @@ def stats():
     })
 
 @app.route('/api/turmas')
+@requer_login
 def turmas():
     db = get_db()
     return jsonify(q("""
@@ -155,6 +266,7 @@ def turmas():
     """, db=db))
 
 @app.route('/api/alunos', methods=['GET','POST'])
+@requer_login
 def alunos():
     db = get_db()
     if request.method == 'GET':
@@ -183,6 +295,7 @@ def alunos():
         return jsonify({'id': new_id, 'ok': True})
 
 @app.route('/api/alunos/<int:aluno_id>', methods=['GET','PUT'])
+@requer_login
 def aluno(aluno_id):
     db = get_db()
     if request.method == 'GET':
@@ -196,6 +309,7 @@ def aluno(aluno_id):
         return jsonify({'ok': True})
 
 @app.route('/api/alunos/<int:aluno_id>/saida', methods=['PUT'])
+@requer_login
 def saida(aluno_id):
     db = get_db()
     q("UPDATE alunos SET ativo=0 WHERE id=%s", (aluno_id,), db=db)
@@ -204,6 +318,7 @@ def saida(aluno_id):
     return jsonify({'ok': True})
 
 @app.route('/api/frequencia/<int:aluno_id>')
+@requer_login
 def get_freq(aluno_id):
     db  = get_db()
     ano = request.args.get('ano', datetime.now().year)
@@ -215,6 +330,7 @@ def get_freq(aluno_id):
     return jsonify({r['data']: r['presente'] for r in rows})
 
 @app.route('/api/frequencia', methods=['POST'])
+@requer_login
 def set_freq():
     db = get_db()
     d  = request.json
@@ -225,6 +341,7 @@ def set_freq():
     return jsonify({'ok': True})
 
 @app.route('/api/historico')
+@requer_login
 def historico():
     db = get_db()
     rows = q("""
@@ -285,6 +402,7 @@ def seed():
 # ── HTML (same as before) ──────────────────────────────────────────────
 
 @app.route('/')
+@requer_admin
 def index():
     return render_template_string(HTML)
 
@@ -398,6 +516,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
       </div>
       <div class="header-btns">
         <button class="btn" onclick="showTab('relatorio',this)">Relatório</button>
+        <a href="/logout" class="btn" style="text-decoration:none">Sair</a>
         <button class="btn btn-accent" onclick="exportarExcel()">Exportar Excel ↗</button>
       </div>
     </div>
@@ -561,336 +680,6 @@ loadStats();loadTurmasList();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body></html>"""
-
-
-# ── APP PROFESSOR ──────────────────────────────────────────────────────
-
-@app.route('/manifest.json')
-def manifest():
-    return jsonify({
-        "name": "CAIC Professor",
-        "short_name": "CAIC Prof",
-        "start_url": "/professor",
-        "display": "standalone",
-        "background_color": "#faf8f5",
-        "theme_color": "#1a1614",
-        "icons": [{"src":"https://placehold.co/192x192/1a1614/faf8f5?text=C","sizes":"192x192","type":"image/png"}]
-    })
-
-@app.route('/professor')
-def professor():
-    return render_template_string(PROFESSOR_HTML)
-
-PROFESSOR_HTML = r"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-<meta name="theme-color" content="#1a1614"/>
-<title>CAIC — Professor</title>
-<link rel="manifest" href="/manifest.json"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-:root{
-  --ink:#1a1614;--ink2:#4a4540;--ink3:#8a847e;
-  --paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;
-  --accent:#c8602a;--accent-bg:#fdf2ec;
-  --green:#2a6b4a;--green-bg:#edf6f1;
-  --blue:#1e4d8c;--blue-bg:#edf2fb;
-  --radius:14px;--radius-sm:10px;
-}
-body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:480px;margin:0 auto}
-.header{background:var(--ink);padding:1.25rem 1.25rem 1rem;position:sticky;top:0;z-index:10}
-.header-title{font-family:'DM Serif Display',serif;font-size:20px;color:#faf8f5;letter-spacing:-0.3px}
-.header-title em{font-style:italic;color:#e8845a}
-.header-sub{font-size:11px;color:#8a847e;margin-top:2px;text-transform:uppercase;letter-spacing:0.5px}
-.header-turma{font-size:13px;color:#e8e3da;margin-top:6px;font-weight:500;display:none}
-.screen{display:none;padding:1.25rem;min-height:calc(100vh - 80px)}
-.screen.active{display:block}
-.turma-list{display:flex;flex-direction:column;gap:10px;margin-top:1rem}
-.turma-item{background:var(--paper);border:1.5px solid var(--paper3);border-radius:var(--radius);padding:1rem 1.25rem;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:space-between}
-.turma-item:active{transform:scale(.98)}
-.turma-item:hover{border-color:var(--accent);background:var(--accent-bg)}
-.turma-nome{font-weight:600;font-size:15px;color:var(--ink)}
-.turma-info{font-size:12px;color:var(--ink3);margin-top:3px}
-.turma-num{font-family:'DM Serif Display',serif;font-size:28px;color:var(--accent)}
-.date-nav{display:flex;align-items:center;justify-content:space-between;background:var(--paper);border:1px solid var(--paper3);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:1rem}
-.date-btn{width:40px;height:40px;border-radius:50%;border:1px solid var(--paper3);background:var(--paper2);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .15s}
-.date-btn:active{transform:scale(.9)}
-.date-center{text-align:center;flex:1;padding:0 .5rem}
-.date-label{font-weight:600;font-size:14px;color:var(--ink)}
-.date-sub{font-size:11px;color:var(--ink3);margin-top:2px}
-.quick-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem}
-.quick-btn{padding:12px;border-radius:var(--radius-sm);border:1.5px solid;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;text-align:center;transition:all .15s}
-.quick-btn:active{transform:scale(.97)}
-.quick-btn.todos-p{border-color:var(--green);color:var(--green);background:var(--green-bg)}
-.quick-btn.todos-f{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
-.resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:1rem}
-.res-card{background:var(--paper2);border-radius:var(--radius-sm);padding:.75rem;text-align:center;border:1px solid var(--paper3)}
-.res-num{font-family:'DM Serif Display',serif;font-size:24px;line-height:1}
-.res-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;margin-top:3px;color:var(--ink3)}
-.aluno-freq-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--paper3)}
-.aluno-freq-row:last-child{border-bottom:none}
-.af-avatar{width:40px;height:40px;border-radius:50%;background:var(--paper3);display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:14px;color:var(--ink2);flex-shrink:0}
-.af-avatar.pcd{background:#f3edfb;color:#6b3fa0}
-.af-info{flex:1;min-width:0}
-.af-nome{font-size:14px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.af-det{font-size:11px;color:var(--ink3);margin-top:2px}
-.af-toggle{display:flex;gap:6px;flex-shrink:0}
-.tog-btn{width:42px;height:42px;border-radius:50%;border:2px solid;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;display:flex;align-items:center;justify-content:center}
-.tog-btn:active{transform:scale(.88)}
-.tog-p{border-color:var(--green);color:var(--green);background:transparent}
-.tog-p.ativo{background:var(--green);color:#fff}
-.tog-f{border-color:var(--accent);color:var(--accent);background:transparent}
-.tog-f.ativo{background:var(--accent);color:#fff}
-.back-btn{display:flex;align-items:center;gap:6px;color:var(--ink3);font-size:13px;font-weight:500;cursor:pointer;margin-bottom:1rem;padding:4px 0}
-.back-btn:active{opacity:.6}
-.save-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;padding:1rem 1.25rem;background:var(--paper);border-top:1px solid var(--paper3)}
-.save-btn{width:100%;padding:15px;border-radius:var(--radius);background:var(--ink);color:var(--paper);border:none;font-size:15px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s}
-.save-btn:active{transform:scale(.98)}
-.save-btn.saved{background:var(--green)}
-.toast{position:fixed;top:90px;left:50%;transform:translateX(-50%) translateY(-20px);background:var(--ink);color:var(--paper);padding:10px 22px;border-radius:99px;font-size:13px;font-weight:500;z-index:999;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center}
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.empty{text-align:center;padding:3rem 1rem;color:var(--ink3)}
-.empty-icon{font-size:40px;margin-bottom:12px;opacity:.4}
-.loading{text-align:center;padding:2rem;color:var(--ink3);font-size:14px}
-.weekend-warn{background:#fff8e1;border:1px solid #f59e0b;border-radius:var(--radius-sm);padding:.75rem 1rem;font-size:13px;color:#92400e;margin-bottom:1rem;text-align:center}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div class="header-title">CAIC <em>Professor</em></div>
-  <div class="header-sub">Darcy Ribeiro · Ilhéus</div>
-  <div class="header-turma" id="header-turma"></div>
-</div>
-
-<div class="screen active" id="screen-turmas">
-  <div style="margin-bottom:.5rem">
-    <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--ink)">Selecione sua turma</div>
-    <div style="font-size:13px;color:var(--ink3);margin-top:4px">Toque na turma para registrar frequência</div>
-  </div>
-  <div class="turma-list" id="turma-list">
-    <div class="loading">Carregando turmas...</div>
-  </div>
-</div>
-
-<div class="screen" id="screen-freq">
-  <div class="back-btn" onclick="voltarTurmas()">← Trocar turma</div>
-
-  <div class="date-nav">
-    <button class="date-btn" onclick="mudarDia(-1)">‹</button>
-    <div class="date-center">
-      <div class="date-label" id="date-label">—</div>
-      <div class="date-sub" id="date-sub">—</div>
-    </div>
-    <button class="date-btn" onclick="mudarDia(1)">›</button>
-  </div>
-
-  <div id="weekend-warn" class="weekend-warn" style="display:none">
-    ⚠️ Final de semana — tem certeza que quer registrar frequência?
-  </div>
-
-  <div class="resumo">
-    <div class="res-card"><div class="res-num" id="res-p" style="color:var(--green)">0</div><div class="res-label" style="color:var(--green)">Presentes</div></div>
-    <div class="res-card"><div class="res-num" id="res-f" style="color:var(--accent)">0</div><div class="res-label" style="color:var(--accent)">Faltas</div></div>
-    <div class="res-card"><div class="res-num" id="res-s" style="color:var(--ink3)">0</div><div class="res-label">Sem reg.</div></div>
-  </div>
-
-  <div class="quick-row">
-    <button class="quick-btn todos-p" onclick="marcarTodos(1)">✓ Todos presentes</button>
-    <button class="quick-btn todos-f" onclick="marcarTodos(0)">✗ Todos faltaram</button>
-  </div>
-
-  <div style="background:var(--paper);border:1px solid var(--paper3);border-radius:var(--radius);padding:1rem;margin-bottom:5rem">
-    <div id="alunos-list"><div class="loading">Carregando alunos...</div></div>
-  </div>
-</div>
-
-<div class="save-bar" id="save-bar" style="display:none">
-  <button class="save-btn" id="save-btn" onclick="salvarFrequencia()">Salvar frequência</button>
-</div>
-
-<div class="toast" id="toast"></div>
-
-<script>
-const DIAS_SEMANA=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
-const MESES_FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-let turmaSel=null, alunosList=[], freqLocal={}, dataAtual=new Date(), salvando=false;
-
-function iniciais(n){return n.split(' ').slice(0,2).map(x=>x[0]).join('').toUpperCase()}
-function dateStr(d){return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
-function isWeekend(d){return d.getDay()===0||d.getDay()===6}
-
-function showToast(msg,ok=true){
-  const t=document.getElementById('toast');
-  t.textContent=msg;
-  t.style.background=ok?'var(--ink)':'var(--accent)';
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),2800);
-}
-
-async function api(method,path,body=null){
-  const opts={method,headers:{'Content-Type':'application/json'}};
-  if(body)opts.body=JSON.stringify(body);
-  const r=await fetch('/api'+path,opts);
-  return r.json();
-}
-
-async function carregarTurmas(){
-  const turmas=await api('GET','/turmas');
-  const el=document.getElementById('turma-list');
-  if(!turmas.length){
-    el.innerHTML='<div class="empty"><div class="empty-icon">📋</div>Nenhuma turma encontrada.</div>';
-    return;
-  }
-  el.innerHTML=turmas.map((t,i)=>`
-    <div class="turma-item" data-idx="${i}">
-      <div>
-        <div class="turma-nome">${t.nome}</div>
-        <div class="turma-info">${t.turno||'—'} · ${t.total} aluno${t.total!==1?'s':''}</div>
-      </div>
-      <div class="turma-num">${t.total}</div>
-    </div>`).join('');
-  el.querySelectorAll('.turma-item').forEach(item=>{
-    item.addEventListener('click',()=>selecionarTurma(turmas[parseInt(item.dataset.idx)]));
-  });
-}
-
-async function selecionarTurma(turma){
-  turmaSel=turma;
-  document.getElementById('header-turma').textContent=turma.nome;
-  document.getElementById('header-turma').style.display='block';
-  document.getElementById('screen-turmas').classList.remove('active');
-  document.getElementById('screen-freq').classList.add('active');
-  document.getElementById('save-bar').style.display='block';
-  dataAtual=new Date();
-  await carregarFreqDia();
-}
-
-function voltarTurmas(){
-  turmaSel=null;alunosList=[];freqLocal={};
-  document.getElementById('header-turma').style.display='none';
-  document.getElementById('screen-freq').classList.remove('active');
-  document.getElementById('screen-turmas').classList.add('active');
-  document.getElementById('save-bar').style.display='none';
-}
-
-function atualizarDateUI(){
-  const d=dataAtual;
-  document.getElementById('date-label').textContent=
-    `${DIAS_SEMANA[d.getDay()]}, ${d.getDate()} de ${MESES_FULL[d.getMonth()]}`;
-  document.getElementById('date-sub').textContent=`${d.getFullYear()}`;
-  document.getElementById('weekend-warn').style.display=isWeekend(d)?'block':'none';
-}
-
-async function mudarDia(delta){
-  const nova=new Date(dataAtual);
-  nova.setDate(nova.getDate()+delta);
-  dataAtual=nova;
-  await carregarFreqDia();
-  // Reset save btn
-  const sb=document.getElementById('save-btn');
-  sb.textContent='Salvar frequência';
-  sb.classList.remove('saved');
-  sb.style.background='';
-}
-
-async function carregarFreqDia(){
-  atualizarDateUI();
-  document.getElementById('alunos-list').innerHTML='<div class="loading">Carregando...</div>';
-  const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(turmaSel.nome)}&ativo=1`);
-  alunosList=alunos;
-  freqLocal={};
-  const ds=dateStr(dataAtual);
-  await Promise.all(alunos.map(async a=>{
-    const freq=await api('GET',`/frequencia/${a.id}?ano=${dataAtual.getFullYear()}&mes=${dataAtual.getMonth()+1}`);
-    if(freq[ds]!==undefined&&freq[ds]!==null) freqLocal[a.id]=freq[ds];
-  }));
-  renderAlunos();
-}
-
-function renderAlunos(){
-  if(!alunosList.length){
-    document.getElementById('alunos-list').innerHTML='<div class="empty"><div class="empty-icon">👥</div>Nenhum aluno ativo nesta turma.</div>';
-    return;
-  }
-  document.getElementById('alunos-list').innerHTML=alunosList.map(a=>{
-    const v=freqLocal[a.id];
-    return`<div class="aluno-freq-row">
-      <div class="af-avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div>
-      <div class="af-info">
-        <div class="af-nome">${a.nome}</div>
-        <div class="af-det">${a.pcd?'PCD · ':''}${a.turma_nome||''}</div>
-      </div>
-      <div class="af-toggle">
-        <button class="tog-btn tog-p ${v===1?'ativo':''}" data-id="${a.id}" data-tipo="p" onclick="toggleFreq(${a.id},1)">P</button>
-        <button class="tog-btn tog-f ${v===0?'ativo':''}" data-id="${a.id}" data-tipo="f" onclick="toggleFreq(${a.id},0)">F</button>
-      </div>
-    </div>`;
-  }).join('');
-  atualizarResumo();
-}
-
-function toggleFreq(id,val){
-  if(freqLocal[id]===val) delete freqLocal[id];
-  else freqLocal[id]=val;
-  document.querySelectorAll(`[data-id="${id}"]`).forEach(b=>{
-    b.classList.remove('ativo');
-    if((b.dataset.tipo==='p'&&freqLocal[id]===1)||(b.dataset.tipo==='f'&&freqLocal[id]===0))
-      b.classList.add('ativo');
-  });
-  atualizarResumo();
-  const sb=document.getElementById('save-btn');
-  sb.textContent='Salvar frequência';
-  sb.classList.remove('saved');
-  sb.style.background='';
-}
-
-function marcarTodos(val){
-  alunosList.forEach(a=>freqLocal[a.id]=val);
-  renderAlunos();
-}
-
-function atualizarResumo(){
-  const p=Object.values(freqLocal).filter(v=>v===1).length;
-  const f=Object.values(freqLocal).filter(v=>v===0).length;
-  document.getElementById('res-p').textContent=p;
-  document.getElementById('res-f').textContent=f;
-  document.getElementById('res-s').textContent=alunosList.length-p-f;
-}
-
-async function salvarFrequencia(){
-  if(salvando)return;
-  salvando=true;
-  const btn=document.getElementById('save-btn');
-  btn.textContent='Salvando...';
-  const ds=dateStr(dataAtual);
-  try{
-    await Promise.all(alunosList.map(a=>
-      api('POST','/frequencia',{
-        aluno_id:a.id,
-        data:ds,
-        presente:freqLocal[a.id]!==undefined?freqLocal[a.id]:null
-      })
-    ));
-    btn.textContent='✓ Salvo!';
-    btn.classList.add('saved');
-    showToast('Frequência salva com sucesso! ✓');
-  }catch(e){
-    btn.textContent='Salvar frequência';
-    showToast('Erro ao salvar. Tente novamente.',false);
-  }
-  salvando=false;
-}
-
-carregarTurmas();
-</script>
-</body>
-</html>"""
 
 if __name__ == '__main__':
     init_db()
