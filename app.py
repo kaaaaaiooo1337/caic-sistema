@@ -37,6 +37,19 @@ def requer_login(f):
 
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
+# ── Auto-init on startup ───────────────────────────────────────────────
+_db_initialized = False
+
+@app.before_request
+def auto_init_db():
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            init_db()
+            _db_initialized = True
+        except Exception as e:
+            print(f"[init_db error] {e}")
+
 # ── Database ───────────────────────────────────────────────────────────
 
 def get_db():
