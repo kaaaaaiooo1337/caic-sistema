@@ -97,12 +97,6 @@ def init_db():
         usuario TEXT,
         data TIMESTAMP DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS feriados (
-        id SERIAL PRIMARY KEY,
-        data TEXT UNIQUE NOT NULL,
-        descricao TEXT NOT NULL,
-        tipo TEXT DEFAULT 'feriado'
-    );
     """)
     conn.commit()
     cur.close()
@@ -456,7 +450,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
     <button class="tab" onclick="showTab('turmas',this)">Turmas</button>
     <button class="tab" onclick="showTab('frequencia',this)">Frequência</button>
     <button class="tab" onclick="showTab('historico',this)">Histórico</button>
-    <button class="tab" onclick="showTab('feriados',this)">Feriados</button>
   </div>
   <div id="tab-cadastro">
     <div class="card">
@@ -521,11 +514,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
     </div>
   </div>
   <div id="tab-relatorio" style="display:none"><div id="rel-container"></div></div>
-
-  <div id="tab-feriados" style="display:none">
-    <div class="card"><div class="card-title">Cadastrar dia não letivo</div><div class="form-grid"><div class="fg"><label>Data *</label><input type="date" id="fer-data"/></div><div class="fg"><label>Tipo</label><select id="fer-tipo"><option value="feriado">Feriado nacional</option><option value="municipal">Feriado municipal</option><option value="recesso">Recesso escolar</option><option value="ponto">Ponto facultativo</option><option value="evento">Evento escolar</option><option value="outro">Outro</option></select></div><div class="fg full"><label>Descrição *</label><input type="text" id="fer-desc" placeholder="Ex: Carnaval, Aniversário de Ilhéus..."/></div></div><div class="actions"><button class="btn btn-primary" onclick="cadastrarFeriado()">Adicionar</button></div></div>
-    <div class="card"><div class="card-title">Dias não letivos <select id="fer-ano-filtro" onchange="renderFeriados()" style="font-size:12px;padding:4px 8px;border:1px solid var(--paper3);border-radius:6px;background:var(--paper2);margin-left:8px"></select></div><div id="feriados-lista"><div class="empty"><div class="empty-icon">📅</div>Nenhum dia cadastrado.</div></div></div>
-  </div>
 </div>
 <!-- MODAL EDITAR -->
 <div class="overlay" id="modal-editar">
@@ -584,7 +572,7 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 function fecharModal(id){document.getElementById(id).classList.remove('open')}
 async function loadStats(){const s=await api('GET','/stats');document.getElementById('st-total').textContent=s.total_ativos;document.getElementById('st-entrada').textContent=s.entradas_mes;document.getElementById('st-saida').textContent=s.saidas_mes;document.getElementById('st-turmas').textContent=s.total_turmas;document.getElementById('st-pcd').textContent=s.total_pcd;document.getElementById('st-mat').textContent=s.matutino;document.getElementById('st-ves').textContent=s.vespertino;}
 async function loadTurmasList(){turmasCache=await api('GET','/turmas');const dl=document.getElementById('turmas-list');dl.innerHTML=turmasCache.map(t=>`<option value="${t.nome}">`).join('');['fl-turma','fq-turma'].forEach(id=>{const sel=document.getElementById(id);const val=sel.value;const pre=id==='fl-turma'?'<option value="">Todas as turmas</option>':'<option value="">Selecione uma turma</option>';sel.innerHTML=pre+turmasCache.map(t=>`<option value="${t.nome}"${t.nome===val?'selected':''}>${t.nome} (${t.total})</option>`).join('');});}
-function showTab(tab,el){document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+tab).style.display='block';if(el)el.classList.add('active');if(tab==='lista'){loadTurmasList();renderLista();}if(tab==='turmas'){loadTurmasList();renderTurmas();}if(tab==='historico')renderHistorico();if(tab==='feriados'){initFeriados();renderFeriados();}if(tab==='frequencia'){initFreq();carregarFeriados(new Date().getFullYear());renderFreqTurma();}if(tab==='relatorio')renderRelatorio();}
+function showTab(tab,el){document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+tab).style.display='block';if(el)el.classList.add('active');if(tab==='lista'){loadTurmasList();renderLista();}if(tab==='turmas'){loadTurmasList();renderTurmas();}if(tab==='historico')renderHistorico();if(tab==='frequencia'){initFreq();renderFreqTurma();}if(tab==='relatorio')renderRelatorio();}
 async function cadastrar(){const nome=document.getElementById('f-nome').value.trim();if(!nome){toast('Informe o nome do aluno.');return;}await api('POST','/alunos',{nome,turma_nome:document.getElementById('f-turma').value.trim(),turno:document.getElementById('f-turno').value,data_nascimento:document.getElementById('f-nasc').value||null,cpf:document.getElementById('f-cpf').value.trim()||null,raca:document.getElementById('f-raca').value||null,sus:document.getElementById('f-sus').value.trim()||null,pcd:parseInt(document.getElementById('f-pcd').value),especificidade:document.getElementById('f-espec').value.trim()||null,apoio:document.getElementById('f-apoio').value.trim()||null,responsavel:document.getElementById('f-resp').value.trim()||null,telefone:document.getElementById('f-tel').value.trim()||null,endereco:document.getElementById('f-end').value.trim()||null,cidade:document.getElementById('f-cidade').value.trim()||null,cep:document.getElementById('f-cep').value.trim()||null,obs:document.getElementById('f-obs').value.trim()||null,ativo:1});toast(`Aluno "${nome}" cadastrado!`);limparForm();loadStats();loadTurmasList();}
 function limparForm(){['f-nome','f-turma','f-cpf','f-sus','f-resp','f-tel','f-end','f-cidade','f-cep','f-obs','f-espec','f-apoio'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});['f-turno','f-raca','f-pcd'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-nasc').value='';document.getElementById('fg-espec').style.display='none';document.getElementById('fg-apoio').style.display='none';}
 async function renderLista(){const busca=document.getElementById('busca').value;const turma=document.getElementById('fl-turma').value;const turno=document.getElementById('fl-turno').value;const status=document.getElementById('fl-status').value;let url=`/alunos?ativo=${status}`;if(busca)url+=`&busca=${encodeURIComponent(busca)}`;if(turma)url+=`&turma=${encodeURIComponent(turma)}`;if(turno)url+=`&turno=${encodeURIComponent(turno)}`;const alunos=await api('GET',url);const el=document.getElementById('lista-container');if(!alunos.length){el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div>Nenhum aluno encontrado.</div>';return;}el.innerHTML=alunos.map(a=>`<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det">${a.turma_nome||'Sem turma'} · ${a.turno||a.turma_turno||'—'}${a.telefone?' · '+a.telefone:''}${a.pcd?' · PCD':''}</div></div>${a.pcd?'<span class="badge badge-pcd">PCD</span>':''}<span class="badge ${a.ativo?'badge-ativo':'badge-inativo'}">${a.ativo?'Ativo':'Inativo'}</span><div class="aluno-btns"><button class="btn btn-edit" data-id="${a.id}" onclick="abrirEdicao(parseInt(this.dataset.id))">Editar</button>${a.ativo?`<button class="btn btn-danger" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="registrarSaida(parseInt(this.dataset.id),this.dataset.nome)">Saída</button>`:''}</div></div>`).join('');}
@@ -594,57 +582,13 @@ async function salvarEdicao(){const id=document.getElementById('e-id').value;awa
 function renderTurmas(){const grid=document.getElementById('turmas-grid');grid.innerHTML=turmasCache.map((t,i)=>`<div class="turma-card" data-idx="${i}"><div class="turma-card-nome">${t.nome}</div><div class="turma-card-info">${t.turno||'—'}</div><div class="turma-card-num">${t.total}</div></div>`).join('');grid.querySelectorAll('.turma-card').forEach(card=>{card.addEventListener('click',function(){const t=turmasCache[parseInt(this.dataset.idx)];verTurma(t.nome,this);});});document.getElementById('turma-detalhe').style.display='none';}
 async function verTurma(nome,card){document.querySelectorAll('.turma-card').forEach(c=>c.classList.remove('selected'));card.classList.add('selected');const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(nome)}&ativo=1`);document.getElementById('turma-detalhe-titulo').textContent=`${nome} — ${alunos.length} aluno(s)`;document.getElementById('turma-detalhe-lista').innerHTML=alunos.map(a=>`<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det">${a.data_nascimento?'Nasc: '+fmtData(a.data_nascimento):''}${a.telefone?' · '+a.telefone:''}${a.pcd?' · PCD':''}</div></div>${a.pcd?'<span class="badge badge-pcd">PCD</span>':''}</div>`).join('')||'<div class="empty">Nenhum aluno ativo.</div>';const det=document.getElementById('turma-detalhe');det.style.display='block';det.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function initFreq(){const agora=new Date();['fq-mes','mf-mes'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML=MESES.map((m,i)=>`<option value="${i}"${i===agora.getMonth()?'selected':''}>${m}</option>`).join('');});const anos=[];for(let y=agora.getFullYear()-1;y<=agora.getFullYear()+1;y++)anos.push(y);['fq-ano','mf-ano'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML=anos.map(y=>`<option value="${y}"${y===agora.getFullYear()?'selected':''}>${y}</option>`).join('');});}
-function diasUteis(ano,mes){const dias=[],total=new Date(ano,mes+1,0).getDate();for(let d=1;d<=total;d++){const dow=new Date(ano,mes,d).getDay();const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;if(dow!==0&&dow!==6&&!feriadosCache[ds])dias.push(d);}return dias;}return dias;}
+function diasUteis(ano,mes){const dias=[],total=new Date(ano,mes+1,0).getDate();for(let d=1;d<=total;d++){const dow=new Date(ano,mes,d).getDay();if(dow!==0&&dow!==6)dias.push(d);}return dias;}
 async function renderFreqTurma(){const turma=document.getElementById('fq-turma').value;const mes=parseInt(document.getElementById('fq-mes').value);const ano=parseInt(document.getElementById('fq-ano').value);const el=document.getElementById('freq-container');if(!turma){el.innerHTML='<div class="card"><div class="empty"><div class="empty-icon">📅</div>Selecione uma turma.</div></div>';return;}const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(turma)}&ativo=1`);if(!alunos.length){el.innerHTML='<div class="card"><div class="empty">Nenhum aluno ativo nesta turma.</div></div>';return;}const dias=diasUteis(ano,mes);const rows=await Promise.all(alunos.map(async a=>{const freq=await api('GET',`/frequencia/${a.id}?ano=${ano}&mes=${mes+1}`);const p=Object.values(freq).filter(v=>v===1).length;const f=Object.values(freq).filter(v=>v===0).length;const pct=dias.length>0?Math.round((p/dias.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':'var(--accent)';return `<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det"><span style="color:var(--green);font-weight:600">${p}P</span> · <span style="color:var(--accent);font-weight:600">${f}F</span> · ${dias.length-p-f} sem registro</div></div><div style="text-align:right;min-width:48px"><div style="font-family:'DM Serif Display',serif;font-size:20px;color:${cor}">${pct}%</div></div><button class="btn btn-edit" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="abrirFreqAluno(parseInt(this.dataset.id),this.dataset.nome)">Ver dias</button></div>`;}));el.innerHTML=`<div class="card"><div class="card-title">${turma} · ${MESES[mes]} ${ano}</div>${rows.join('')}</div>`;}
 async function abrirFreqAluno(id,nome){mfAlunoId=id;document.getElementById('mf-nome').textContent=nome;document.getElementById('mf-mes').value=document.getElementById('fq-mes').value;document.getElementById('mf-ano').value=document.getElementById('fq-ano').value;await renderModalFreq();document.getElementById('modal-freq').classList.add('open');}
 async function renderModalFreq(){if(!mfAlunoId)return;const mes=parseInt(document.getElementById('mf-mes').value);const ano=parseInt(document.getElementById('mf-ano').value);const freq=await api('GET',`/frequencia/${mfAlunoId}?ano=${ano}&mes=${mes+1}`);const dias=diasUteis(ano,mes);const p=Object.values(freq).filter(v=>v===1).length;const f=Object.values(freq).filter(v=>v===0).length;const pct=dias.length>0?Math.round((p/dias.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':'var(--accent)';const grid=dias.map(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const v=freq[ds];const bg=v===1?'var(--green-bg)':v===0?'var(--accent-bg)':'var(--paper2)';const lbl=v===1?'P':v===0?'F':'—';const clr=v===1?'var(--green)':v===0?'var(--accent)':'var(--ink3)';return `<div class="dia-btn" style="background:${bg}" onclick="toggleFreq(${mfAlunoId},'${ds}',${v===null||v===undefined?'null':v})"><div style="font-size:10px;color:var(--ink3)">${DSEM[new Date(ano,mes,d).getDay()]}</div><div style="font-size:15px;font-weight:700;color:${clr}">${lbl}</div><div style="font-size:11px;color:var(--ink3)">${d}</div></div>`;}).join('');document.getElementById('mf-conteudo').innerHTML=`<div style="display:flex;gap:8px;margin-bottom:1rem"><div style="flex:1;background:var(--green-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--green)">${p}</div><div style="font-size:11px;color:var(--green);font-weight:600">Presenças</div></div><div style="flex:1;background:var(--accent-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--accent)">${f}</div><div style="font-size:11px;color:var(--accent);font-weight:600">Faltas</div></div><div style="flex:1;background:var(--paper2);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:${cor}">${pct}%</div><div style="font-size:11px;color:var(--ink3);font-weight:600">Frequência</div></div></div><div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Clique num dia: — → P → F → —</div><div class="freq-grid">${grid}</div>`;}
 async function toggleFreq(id,ds,atual){let novo;if(atual===null||atual===undefined||atual==='null')novo=1;else if(atual===1||atual==='1')novo=0;else novo=null;await api('POST','/frequencia',{aluno_id:id,data:ds,presente:novo});renderModalFreq();renderFreqTurma();}
 async function renderHistorico(){const rows=await api('GET','/historico');const el=document.getElementById('hist-container');if(!rows.length){el.innerHTML='<div class="empty"><div class="empty-icon">📅</div>Sem movimentações.</div>';return;}el.innerHTML=rows.map(h=>`<div class="log-row"><div class="log-dot ${h.tipo==='ENTRADA'?'E':h.tipo==='SAÍDA'?'S':'ED'}">${h.tipo==='ENTRADA'?'E':h.tipo==='SAÍDA'?'S':'ED'}</div><div class="log-body"><div class="log-name">${h.aluno_nome||'—'}</div><div class="log-meta">${h.tipo} · ${h.descricao||''}</div></div><div class="log-date">${fmtData(h.data)}</div></div>`).join('');}
 async function renderRelatorio(){const[stats,turmas]=await Promise.all([api('GET','/stats'),api('GET','/turmas')]);const agora=new Date();document.getElementById('rel-container').innerHTML=`<div class="card"><div class="card-title">${MESES[agora.getMonth()]} ${agora.getFullYear()}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.5rem"><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.total_ativos}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Alunos ativos</div></div><div style="background:var(--green-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--green)">${stats.matutino}</div><div style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase">Matutino</div></div><div style="background:var(--accent-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--accent)">${stats.vespertino}</div><div style="font-size:11px;color:var(--accent);font-weight:600;text-transform:uppercase">Vespertino</div></div><div style="background:var(--purple-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--purple)">${stats.total_pcd}</div><div style="font-size:11px;color:var(--purple);font-weight:600;text-transform:uppercase">Alunos PCD</div></div><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.entradas_mes}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Entradas no mês</div></div><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.saidas_mes}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Saídas no mês</div></div></div><div class="sdiv">Alunos por turma</div>${turmas.map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--paper3);font-size:13px"><span style="color:var(--ink2)">${t.nome} <span style="color:var(--ink3)">(${t.turno||'—'})</span></span><span style="font-weight:700;background:var(--paper2);padding:2px 10px;border-radius:99px;font-size:12px">${t.total} aluno${t.total!==1?'s':''}</span></div>`).join('')}</div>`;}
-
-// ── FERIADOS ──────────────────────────────────────────────────────────
-let feriadosCache={};
-
-function initFeriados(){
-  const sel=document.getElementById('fer-ano-filtro');
-  const ano=new Date().getFullYear();
-  sel.innerHTML=[ano-1,ano,ano+1].map(y=>`<option value="${y}"${y===ano?'selected':''}>${y}</option>`).join('');
-  document.getElementById('fer-data').value=new Date().toISOString().split('T')[0];
-}
-
-async function renderFeriados(){
-  const ano=document.getElementById('fer-ano-filtro').value;
-  const lista=await api('GET',`/feriados?ano=${ano}`);
-  feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);
-  const el=document.getElementById('feriados-lista');
-  if(!lista.length){el.innerHTML='<div class="empty"><div class="empty-icon">📅</div>Nenhum dia não letivo em '+ano+'.</div>';return;}
-  const tLabel={feriado:'Feriado nacional',municipal:'Feriado municipal',recesso:'Recesso',ponto:'Ponto facultativo',evento:'Evento escolar',outro:'Outro'};
-  const tColor={feriado:'var(--accent)',municipal:'var(--blue)',recesso:'var(--green)',ponto:'var(--ink3)',evento:'#6b3fa0',outro:'var(--ink3)'};
-  el.innerHTML=lista.map(f=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--paper3)"><div style="min-width:90px;font-size:12px;font-weight:600;color:var(--ink)">${fmtData(f.data)}</div><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--ink)">${f.descricao}</div><div style="font-size:11px;color:${tColor[f.tipo]||'var(--ink3)'};margin-top:2px;font-weight:500">${tLabel[f.tipo]||f.tipo}</div></div><button class="btn" style="color:var(--accent);border-color:var(--paper3);padding:4px 10px;font-size:12px" onclick="deletarFeriado('${f.data}','${f.descricao.replace(/'/g,"\\'")}')">Remover</button></div>`).join('');
-}
-
-async function cadastrarFeriado(){
-  const data=document.getElementById('fer-data').value;
-  const desc=document.getElementById('fer-desc').value.trim();
-  const tipo=document.getElementById('fer-tipo').value;
-  if(!data||!desc){toast('Preencha a data e a descrição.');return;}
-  await api('POST','/feriados',{data,descricao:desc,tipo});
-  document.getElementById('fer-desc').value='';
-  toast('Dia não letivo cadastrado!');renderFeriados();
-}
-
-async function deletarFeriado(data,desc){
-  if(!confirm(`Remover "${desc}" (${fmtData(data)})?`))return;
-  await api('DELETE',`/feriados/${data}`);
-  toast('Removido com sucesso.');renderFeriados();
-}
-
-async function carregarFeriados(ano){
-  const lista=await api('GET',`/feriados?ano=${ano}`);
-  feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);
-  return feriadosCache;
-}
-
 async function exportarExcel(){const alunos=await api('GET','/alunos?ativo=todos');if(!window.XLSX){toast('Biblioteca carregando...');return;}const wb=XLSX.utils.book_new();const data=[['Nome','Turma','Turno','Nascimento','CPF','Raça','SUS','PCD','Especificidade','Apoio','Responsável','Telefone','Endereço','Cidade','CEP','Status','Obs']];alunos.forEach(a=>data.push([a.nome,a.turma_nome||'',a.turno||a.turma_turno||'',fmtData(a.data_nascimento),a.cpf||'',a.raca||'',a.sus||'',a.pcd?'Sim':'Não',a.especificidade||'',a.apoio||'',a.responsavel||'',a.telefone||'',a.endereco||'',a.cidade||'',a.cep||'',a.ativo?'Ativo':'Inativo',a.obs||'']));const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[22,14,12,12,16,10,20,6,16,16,22,16,28,14,10,8,20].map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,ws,'Alunos');XLSX.writeFile(wb,`Alunos_CAIC_${new Date().toISOString().split('T')[0]}.xlsx`);toast('Excel exportado!');}
 loadStats();loadTurmasList();
 </script>
@@ -926,32 +870,6 @@ async function salvarFrequencia(){
 carregarTurmas();
 </script>
 </body></html>"""
-
-
-# ── FERIADOS API ──────────────────────────────────────────────────────
-
-@app.route('/api/feriados', methods=['GET','POST'])
-@requer_login
-def feriados_route():
-    if request.method == 'GET':
-        ano = request.args.get('ano', '')
-        if ano:
-            rows = q("SELECT * FROM feriados WHERE data LIKE %s ORDER BY data", (f"{ano}-%",))
-        else:
-            rows = q("SELECT * FROM feriados ORDER BY data")
-        return jsonify(rows)
-    d = request.json
-    db = get_db()
-    q("INSERT INTO feriados (data, descricao, tipo) VALUES (%s,%s,%s) ON CONFLICT (data) DO UPDATE SET descricao=EXCLUDED.descricao, tipo=EXCLUDED.tipo",
-      (d['data'], d['descricao'], d.get('tipo','feriado')), db=db)
-    return jsonify({'ok': True})
-
-@app.route('/api/feriados/<string:data_str>', methods=['DELETE'])
-@requer_admin
-def deletar_feriado_route(data_str):
-    db = get_db()
-    q("DELETE FROM feriados WHERE data=%s", (data_str,), db=db)
-    return jsonify({'ok': True})
 
 if __name__ == '__main__':
     init_db()
