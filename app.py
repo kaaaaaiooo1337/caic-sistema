@@ -397,6 +397,16 @@ HTML = r"""<!DOCTYPE html>
   --purple:#6b3fa0;--purple-bg:#f3edfb;
   --radius:12px;--radius-sm:8px;
 }
+[data-theme="dark"]{
+  --ink:#f0ece8;--ink2:#c4bdb6;--ink3:#7a746e;
+  --paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;
+  --accent:#e8845a;--accent2:#f0a07a;--accent-bg:#2d1c12;
+  --green:#4aaf78;--green-bg:#0e2318;
+  --blue:#6b9fd4;--blue-bg:#0e1a2d;
+  --purple:#a67dd4;--purple-bg:#1e1228;
+}
+.theme-toggle{background:var(--paper2);border:1px solid var(--paper3);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--ink2);font-family:'DM Sans',sans-serif;transition:all .2s;display:flex;align-items:center;gap:6px}
+.theme-toggle:hover{background:var(--paper3)}
 body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
 .app{max-width:960px;margin:0 auto;padding:2rem 1rem 4rem}
 .header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid var(--paper3)}
@@ -488,6 +498,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
         <div class="logo-sub">Escola CAIC · <strong>Darcy Ribeiro · Ilhéus</strong></div>
       </div>
       <div class="header-btns">
+        <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn" title="Alternar modo escuro">🌙 Escuro</button>
         <button class="btn" onclick="showTab('relatorio',this)">Relatório</button>
         <a href="/logout" class="btn" style="text-decoration:none">Sair</a>
         <button class="btn btn-accent" onclick="exportarExcel()">Exportar Excel ↗</button>
@@ -648,6 +659,19 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
 </div>
 <div class="toast" id="toast"></div>
 <script>
+// ── Dark mode ─────────────────────────────────────────
+function applyTheme(dark){
+  document.documentElement.setAttribute('data-theme', dark?'dark':'light');
+  const btn=document.getElementById('theme-btn');
+  if(btn)btn.innerHTML=dark?'☀️ Claro':'🌙 Escuro';
+}
+function toggleTheme(){
+  const dark=document.documentElement.getAttribute('data-theme')==='dark';
+  localStorage.setItem('caic-theme',dark?'light':'dark');
+  applyTheme(!dark);
+}
+(function(){applyTheme(localStorage.getItem('caic-theme')==='dark');})();
+// ─────────────────────────────────────────────────────
 const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const DSEM=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 let turmasCache=[],mfAlunoId=null;
@@ -708,6 +732,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--ink:#1a1614;--ink3:#8a847e;--paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;--accent:#c8602a;--radius:14px;--radius-sm:10px}
+[data-theme="dark"]{--ink:#f0ece8;--ink3:#7a746e;--paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;--accent:#e8845a}
 body{font-family:'DM Sans',sans-serif;background:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
 .box{background:var(--paper);border-radius:var(--radius);padding:2.5rem 2rem;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .logo{font-family:'DM Serif Display',serif;font-size:26px;color:var(--ink);letter-spacing:-0.5px;margin-bottom:4px}
@@ -746,6 +771,7 @@ function setTipo(tipo,el){document.getElementById('tipo-input').value=tipo;docum
 const p=new URLSearchParams(window.location.search);
 if(p.get('erro')==='1')document.getElementById('erro').classList.add('show');
 if(p.get('tipo')==='professor'){document.getElementById('tipo-input').value='professor';document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===1));}
+(function(){if(localStorage.getItem('caic-theme')==='dark')document.documentElement.setAttribute('data-theme','dark');})();
 </script>
 </body></html>"""
 
@@ -791,6 +817,9 @@ PROFESSOR_HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--ink:#1a1614;--ink2:#4a4540;--ink3:#8a847e;--paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;--accent:#c8602a;--accent-bg:#fdf2ec;--green:#2a6b4a;--green-bg:#edf6f1;--radius:14px;--radius-sm:10px}
+[data-theme="dark"]{--ink:#f0ece8;--ink2:#c4bdb6;--ink3:#7a746e;--paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;--accent:#e8845a;--accent-bg:#2d1c12;--green:#4aaf78;--green-bg:#0e2318}
+.theme-toggle{position:fixed;top:14px;right:14px;background:var(--paper2);border:1px solid var(--paper3);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--ink2);font-family:'DM Sans',sans-serif;z-index:100;transition:all .2s}
+.theme-toggle:hover{background:var(--paper3)}
 body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:480px;margin:0 auto}
 .header{background:var(--ink);padding:1.25rem 1.25rem 1rem;top:0;z-index:10;position:relative}
 .header-title{font-family:'DM Serif Display',serif;font-size:20px;color:#faf8f5;letter-spacing:-0.3px}
@@ -844,6 +873,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);m
   <div class="header-turma" id="header-turma"></div>
   <a href="/logout" class="logout-btn">Sair</a>
 </div>
+<button class="theme-toggle" onclick="toggleTheme()" id="theme-btn-prof">🌙</button>
 <div class="screen active" id="screen-turmas">
   <div style="margin-bottom:.5rem;margin-top:.25rem">
     <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--ink)">Selecione sua turma</div>
@@ -879,6 +909,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);m
 <div class="toast" id="toast"></div>
 <script>
 const DIAS=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+// ── Dark mode ─────────────────────────────────────────
+function applyTheme(dark){
+  document.documentElement.setAttribute('data-theme',dark?'dark':'light');
+  const btn=document.getElementById('theme-btn-prof');
+  if(btn)btn.textContent=dark?'☀️':'🌙';
+}
+function toggleTheme(){
+  const dark=document.documentElement.getAttribute('data-theme')==='dark';
+  localStorage.setItem('caic-theme',dark?'light':'dark');
+  applyTheme(!dark);
+}
+(function(){applyTheme(localStorage.getItem('caic-theme')==='dark');})();
+// ─────────────────────────────────────────────────────
 const MESES_FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 let turmaSel=null,alunosList=[],freqLocal={},dataAtual=new Date(),salvando=false;
 function iniciais(n){return n.split(' ').slice(0,2).map(x=>x[0]).join('').toUpperCase()}
