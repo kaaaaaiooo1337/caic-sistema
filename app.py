@@ -97,6 +97,12 @@ def init_db():
         usuario TEXT,
         data TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS feriados (
+        id SERIAL PRIMARY KEY,
+        data TEXT UNIQUE NOT NULL,
+        descricao TEXT NOT NULL,
+        tipo TEXT DEFAULT 'feriado'
+    );
     """)
     conn.commit()
     cur.close()
@@ -450,6 +456,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
     <button class="tab" onclick="showTab('turmas',this)">Turmas</button>
     <button class="tab" onclick="showTab('frequencia',this)">Frequência</button>
     <button class="tab" onclick="showTab('historico',this)">Histórico</button>
+    <button class="tab" onclick="showTab('feriados',this)">Feriados</button>
   </div>
   <div id="tab-cadastro">
     <div class="card">
@@ -516,30 +523,8 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
   <div id="tab-relatorio" style="display:none"><div id="rel-container"></div></div>
 
   <div id="tab-feriados" style="display:none">
-    <div class="card">
-      <div class="card-title">Cadastrar dia não letivo</div>
-      <div class="form-grid">
-        <div class="fg"><label>Data *</label><input type="date" id="fer-data"/></div>
-        <div class="fg"><label>Tipo</label>
-          <select id="fer-tipo">
-            <option value="feriado">Feriado nacional</option>
-            <option value="municipal">Feriado municipal</option>
-            <option value="recesso">Recesso escolar</option>
-            <option value="ponto">Ponto facultativo</option>
-            <option value="evento">Evento escolar</option>
-            <option value="outro">Outro</option>
-          </select>
-        </div>
-        <div class="fg full"><label>Descrição *</label><input type="text" id="fer-desc" placeholder="Ex: Carnaval, Aniversário de Ilhéus..."/></div>
-      </div>
-      <div class="actions"><button class="btn btn-primary" onclick="cadastrarFeriado()">Adicionar</button></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Dias não letivos
-        <select id="fer-ano-filtro" onchange="renderFeriados()" style="font-size:12px;padding:4px 8px;border:1px solid var(--paper3);border-radius:6px;background:var(--paper2);margin-left:8px"></select>
-      </div>
-      <div id="feriados-lista"><div class="empty"><div class="empty-icon">📅</div>Nenhum dia cadastrado.</div></div>
-    </div>
+    <div class="card"><div class="card-title">Cadastrar dia não letivo</div><div class="form-grid"><div class="fg"><label>Data *</label><input type="date" id="fer-data"/></div><div class="fg"><label>Tipo</label><select id="fer-tipo"><option value="feriado">Feriado nacional</option><option value="municipal">Feriado municipal</option><option value="recesso">Recesso escolar</option><option value="ponto">Ponto facultativo</option><option value="evento">Evento escolar</option><option value="outro">Outro</option></select></div><div class="fg full"><label>Descrição *</label><input type="text" id="fer-desc" placeholder="Ex: Carnaval, Aniversário de Ilhéus..."/></div></div><div class="actions"><button class="btn btn-primary" onclick="cadastrarFeriado()">Adicionar</button></div></div>
+    <div class="card"><div class="card-title">Dias não letivos <select id="fer-ano-filtro" onchange="renderFeriados()" style="font-size:12px;padding:4px 8px;border:1px solid var(--paper3);border-radius:6px;background:var(--paper2);margin-left:8px"></select></div><div id="feriados-lista"><div class="empty"><div class="empty-icon">📅</div>Nenhum dia cadastrado.</div></div></div>
   </div>
 </div>
 <!-- MODAL EDITAR -->
@@ -630,21 +615,12 @@ function initFeriados(){
 async function renderFeriados(){
   const ano=document.getElementById('fer-ano-filtro').value;
   const lista=await api('GET',`/feriados?ano=${ano}`);
-  feriadosCache={};
-  lista.forEach(f=>feriadosCache[f.data]=f.descricao);
+  feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);
   const el=document.getElementById('feriados-lista');
   if(!lista.length){el.innerHTML='<div class="empty"><div class="empty-icon">📅</div>Nenhum dia não letivo em '+ano+'.</div>';return;}
   const tLabel={feriado:'Feriado nacional',municipal:'Feriado municipal',recesso:'Recesso',ponto:'Ponto facultativo',evento:'Evento escolar',outro:'Outro'};
   const tColor={feriado:'var(--accent)',municipal:'var(--blue)',recesso:'var(--green)',ponto:'var(--ink3)',evento:'#6b3fa0',outro:'var(--ink3)'};
-  el.innerHTML=lista.map(f=>`
-    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--paper3)">
-      <div style="min-width:90px;font-size:12px;font-weight:600;color:var(--ink)">${fmtData(f.data)}</div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:600;color:var(--ink)">${f.descricao}</div>
-        <div style="font-size:11px;color:${tColor[f.tipo]||'var(--ink3)'};margin-top:2px;font-weight:500">${tLabel[f.tipo]||f.tipo}</div>
-      </div>
-      <button class="btn" style="color:var(--accent);border-color:var(--paper3);padding:4px 10px;font-size:12px" onclick="deletarFeriado('${f.data}','${f.descricao.replace(/'/g,"\\'")}')">Remover</button>
-    </div>`).join('');
+  el.innerHTML=lista.map(f=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--paper3)"><div style="min-width:90px;font-size:12px;font-weight:600;color:var(--ink)">${fmtData(f.data)}</div><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--ink)">${f.descricao}</div><div style="font-size:11px;color:${tColor[f.tipo]||'var(--ink3)'};margin-top:2px;font-weight:500">${tLabel[f.tipo]||f.tipo}</div></div><button class="btn" style="color:var(--accent);border-color:var(--paper3);padding:4px 10px;font-size:12px" onclick="deletarFeriado('${f.data}','${f.descricao.replace(/'/g,"\\'")}')">Remover</button></div>`).join('');
 }
 
 async function cadastrarFeriado(){
@@ -654,21 +630,18 @@ async function cadastrarFeriado(){
   if(!data||!desc){toast('Preencha a data e a descrição.');return;}
   await api('POST','/feriados',{data,descricao:desc,tipo});
   document.getElementById('fer-desc').value='';
-  toast('Dia não letivo cadastrado!');
-  renderFeriados();
+  toast('Dia não letivo cadastrado!');renderFeriados();
 }
 
 async function deletarFeriado(data,desc){
   if(!confirm(`Remover "${desc}" (${fmtData(data)})?`))return;
   await api('DELETE',`/feriados/${data}`);
-  toast('Removido com sucesso.');
-  renderFeriados();
+  toast('Removido com sucesso.');renderFeriados();
 }
 
 async function carregarFeriados(ano){
   const lista=await api('GET',`/feriados?ano=${ano}`);
-  feriadosCache={};
-  lista.forEach(f=>feriadosCache[f.data]=f.descricao);
+  feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);
   return feriadosCache;
 }
 
@@ -953,6 +926,32 @@ async function salvarFrequencia(){
 carregarTurmas();
 </script>
 </body></html>"""
+
+
+# ── FERIADOS API ──────────────────────────────────────────────────────
+
+@app.route('/api/feriados', methods=['GET','POST'])
+@requer_login
+def feriados_route():
+    if request.method == 'GET':
+        ano = request.args.get('ano', '')
+        if ano:
+            rows = q("SELECT * FROM feriados WHERE data LIKE %s ORDER BY data", (f"{ano}-%",))
+        else:
+            rows = q("SELECT * FROM feriados ORDER BY data")
+        return jsonify(rows)
+    d = request.json
+    db = get_db()
+    q("INSERT INTO feriados (data, descricao, tipo) VALUES (%s,%s,%s) ON CONFLICT (data) DO UPDATE SET descricao=EXCLUDED.descricao, tipo=EXCLUDED.tipo",
+      (d['data'], d['descricao'], d.get('tipo','feriado')), db=db)
+    return jsonify({'ok': True})
+
+@app.route('/api/feriados/<string:data_str>', methods=['DELETE'])
+@requer_admin
+def deletar_feriado_route(data_str):
+    db = get_db()
+    q("DELETE FROM feriados WHERE data=%s", (data_str,), db=db)
+    return jsonify({'ok': True})
 
 if __name__ == '__main__':
     init_db()
