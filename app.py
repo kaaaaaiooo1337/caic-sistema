@@ -55,6 +55,13 @@ def auto_init_db():
 def get_db():
     if 'db' not in g:
         g.db = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
+        else:
+        try:
+            g.db.cursor().execute("SELECT 1")
+        except Exception:
+            try: g.db.close()
+            except: pass
+            g.db = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
     return g.db
 
 @app.teardown_appcontext
@@ -64,7 +71,7 @@ def close_db(e=None):
         db.close()
 
 def init_db():
-    conn = psycopg.connect(DATABASE_URL, sslmode='require')
+    conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
     cur  = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS turmas (
