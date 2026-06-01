@@ -37,24 +37,19 @@ def requer_login(f):
 
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
-# ── Auto-init on startup ───────────────────────────────────────────────
-_db_initialized = False
-
-@app.before_request
-def auto_init_db():
-    global _db_initialized
-    if not _db_initialized:
-        try:
-            init_db()
-            _db_initialized = True
-        except Exception as e:
-            print(f"[init_db error] {e}")
-
 # ── Database ───────────────────────────────────────────────────────────
 
 def get_db():
     if 'db' not in g:
         g.db = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
+    else:
+        # Reconecta se a conexão estiver morta (timeout após inatividade)
+        try:
+            g.db.cursor().execute("SELECT 1")
+        except Exception:
+            try: g.db.close()
+            except: pass
+            g.db = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
     return g.db
 
 @app.teardown_appcontext
@@ -64,7 +59,7 @@ def close_db(e=None):
         db.close()
 
 def init_db():
-    conn = psycopg.connect(DATABASE_URL, sslmode='require')
+    conn = psycopg.connect(DATABASE_URL, row_factory=psycopg.rows.dict_row, sslmode='require')
     cur  = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS turmas (
@@ -110,12 +105,11 @@ def init_db():
         usuario TEXT,
         data TIMESTAMP DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS dias_nao_letivos (
+    CREATE TABLE IF NOT EXISTS feriados (
         id SERIAL PRIMARY KEY,
-        data TEXT NOT NULL UNIQUE,
-        tipo TEXT NOT NULL,
-        motivo TEXT,
-        criado_em TIMESTAMP DEFAULT NOW()
+        data TEXT UNIQUE NOT NULL,
+        descricao TEXT NOT NULL,
+        tipo TEXT DEFAULT 'feriado'
     );
     """)
     conn.commit()
@@ -126,13 +120,18 @@ def init_db():
 
 def q(sql, args=(), one=False, db=None):
     conn = db or get_db()
-    cur  = conn.cursor()
-    cur.execute(sql, args)
-    if sql.strip().upper().startswith('SELECT'):
-        rows = cur.fetchone() if one else cur.fetchall()
-        return dict(rows) if (one and rows) else ([dict(r) for r in rows] if rows else (None if one else []))
-    conn.commit()
-    return cur
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, args)
+        if sql.strip().upper().startswith('SELECT'):
+            rows = cur.fetchone() if one else cur.fetchall()
+            return dict(rows) if (one and rows) else ([dict(r) for r in rows] if rows else (None if one else []))
+        conn.commit()
+        return cur
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        raise e
 
 def get_or_create_turma(db, nome, turno=''):
     row = q("SELECT id FROM turmas WHERE nome=%s", (nome,), one=True, db=db)
@@ -285,45 +284,6 @@ def historico():
     """, db=db)
     return jsonify(rows)
 
-@app.route('/api/dias_nao_letivos', methods=['GET','POST'])
-@requer_login
-def dias_nao_letivos():
-    db = get_db()
-    if request.method == 'GET':
-        ano = request.args.get('ano', datetime.now().year)
-        mes = request.args.get('mes')
-        if mes:
-            rows = q(
-                "SELECT * FROM dias_nao_letivos WHERE data LIKE %s ORDER BY data",
-                (f"{int(ano)}-{int(mes):02d}-%",), db=db
-            )
-        else:
-            rows = q(
-                "SELECT * FROM dias_nao_letivos WHERE data LIKE %s ORDER BY data",
-                (f"{int(ano)}-%",), db=db
-            )
-        return jsonify(rows)
-    else:
-        d = request.json
-        data = d.get('data','').strip()
-        tipo = d.get('tipo','FERIADO')
-        motivo = d.get('motivo','').strip()
-        if not data:
-            return jsonify({'error': 'Data obrigatória'}), 400
-        q("""
-            INSERT INTO dias_nao_letivos (data, tipo, motivo)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (data) DO UPDATE SET tipo=EXCLUDED.tipo, motivo=EXCLUDED.motivo
-        """, (data, tipo, motivo), db=db)
-        return jsonify({'ok': True})
-
-@app.route('/api/dias_nao_letivos/<string:data>', methods=['DELETE'])
-@requer_admin
-def deletar_dia_nao_letivo(data):
-    db = get_db()
-    q("DELETE FROM dias_nao_letivos WHERE data=%s", (data,), db=db)
-    return jsonify({'ok': True})
-
 # ── Seed route (run once to import data) ──────────────────────────────
 
 @app.route('/api/seed', methods=['POST'])
@@ -397,16 +357,6 @@ HTML = r"""<!DOCTYPE html>
   --purple:#6b3fa0;--purple-bg:#f3edfb;
   --radius:12px;--radius-sm:8px;
 }
-[data-theme="dark"]{
-  --ink:#f0ece8;--ink2:#c4bdb6;--ink3:#7a746e;
-  --paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;
-  --accent:#e8845a;--accent2:#f0a07a;--accent-bg:#2d1c12;
-  --green:#4aaf78;--green-bg:#0e2318;
-  --blue:#6b9fd4;--blue-bg:#0e1a2d;
-  --purple:#a67dd4;--purple-bg:#1e1228;
-}
-.theme-toggle{background:var(--paper2);border:1px solid var(--paper3);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--ink2);font-family:'DM Sans',sans-serif;transition:all .2s;display:flex;align-items:center;gap:6px}
-.theme-toggle:hover{background:var(--paper3)}
 body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
 .app{max-width:960px;margin:0 auto;padding:2rem 1rem 4rem}
 .header{margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid var(--paper3)}
@@ -498,7 +448,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
         <div class="logo-sub">Escola CAIC · <strong>Darcy Ribeiro · Ilhéus</strong></div>
       </div>
       <div class="header-btns">
-        <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn" title="Alternar modo escuro">🌙 Escuro</button>
         <button class="btn" onclick="showTab('relatorio',this)">Relatório</button>
         <a href="/logout" class="btn" style="text-decoration:none">Sair</a>
         <button class="btn btn-accent" onclick="exportarExcel()">Exportar Excel ↗</button>
@@ -519,8 +468,8 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
     <button class="tab" onclick="showTab('lista',this)">Lista de alunos</button>
     <button class="tab" onclick="showTab('turmas',this)">Turmas</button>
     <button class="tab" onclick="showTab('frequencia',this)">Frequência</button>
-    <button class="tab" onclick="showTab('calendario',this)">Calendário</button>
     <button class="tab" onclick="showTab('historico',this)">Histórico</button>
+    <button class="tab" onclick="showTab('feriados',this)">Feriados</button>
   </div>
   <div id="tab-cadastro">
     <div class="card">
@@ -584,38 +533,12 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
       <div id="hist-container"><div class="empty"><div class="empty-icon">📅</div>Carregando...</div></div>
     </div>
   </div>
-  <div id="tab-calendario" style="display:none">
-    <div class="card">
-      <div class="card-title">Dias não letivos</div>
-      <div style="display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;align-items:flex-end">
-        <div class="fg" style="flex:1;min-width:130px"><label>Mês/Ano</label>
-          <div style="display:flex;gap:6px">
-            <select id="cal-mes" onchange="renderCalendario()" style="flex:1"></select>
-            <select id="cal-ano" onchange="renderCalendario()" style="min-width:80px"></select>
-          </div>
-        </div>
-      </div>
-      <div style="background:var(--paper2);border:1px solid var(--paper3);border-radius:var(--radius);padding:1.25rem;margin-bottom:1rem">
-        <div class="card-title" style="margin-bottom:1rem">Adicionar dia não letivo</div>
-        <div class="form-grid">
-          <div class="fg"><label>Data</label><input id="cal-data" type="date"/></div>
-          <div class="fg"><label>Tipo</label>
-            <select id="cal-tipo">
-              <option value="FERIADO">Feriado</option>
-              <option value="GREVE">Greve</option>
-              <option value="PONTO_FACULTATIVO">Ponto Facultativo</option>
-              <option value="RECESSO">Recesso</option>
-              <option value="OUTRO">Outro</option>
-            </select>
-          </div>
-          <div class="fg full"><label>Motivo / Descrição</label><input id="cal-motivo" type="text" placeholder="Ex: Feriado de Tiradentes, Greve dos professores..."/></div>
-        </div>
-        <div class="actions"><button class="btn btn-primary" onclick="adicionarDiaNaoLetivo()">Adicionar</button></div>
-      </div>
-      <div id="cal-lista"><div class="empty"><div class="empty-icon">📆</div>Carregando...</div></div>
-    </div>
-  </div>
   <div id="tab-relatorio" style="display:none"><div id="rel-container"></div></div>
+
+  <div id="tab-feriados" style="display:none">
+    <div class="card"><div class="card-title">Cadastrar dia não letivo</div><div class="form-grid"><div class="fg"><label>Data *</label><input type="date" id="fer-data"/></div><div class="fg"><label>Tipo</label><select id="fer-tipo"><option value="feriado">Feriado nacional</option><option value="municipal">Feriado municipal</option><option value="recesso">Recesso escolar</option><option value="ponto">Ponto facultativo</option><option value="evento">Evento escolar</option><option value="outro">Outro</option></select></div><div class="fg full"><label>Descrição *</label><input type="text" id="fer-desc" placeholder="Ex: Carnaval, Aniversário de Ilhéus..."/></div></div><div class="actions"><button class="btn btn-primary" onclick="cadastrarFeriado()">Adicionar</button></div></div>
+    <div class="card"><div class="card-title">Dias não letivos <select id="fer-ano-filtro" onchange="renderFeriados()" style="font-size:12px;padding:4px 8px;border:1px solid var(--paper3);border-radius:6px;background:var(--paper2);margin-left:8px"></select></div><div id="feriados-lista"><div class="empty"><div class="empty-icon">📅</div>Nenhum dia cadastrado.</div></div></div>
+  </div>
 </div>
 <!-- MODAL EDITAR -->
 <div class="overlay" id="modal-editar">
@@ -659,19 +582,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg width='10
 </div>
 <div class="toast" id="toast"></div>
 <script>
-// ── Dark mode ─────────────────────────────────────────
-function applyTheme(dark){
-  document.documentElement.setAttribute('data-theme', dark?'dark':'light');
-  const btn=document.getElementById('theme-btn');
-  if(btn)btn.innerHTML=dark?'☀️ Claro':'🌙 Escuro';
-}
-function toggleTheme(){
-  const dark=document.documentElement.getAttribute('data-theme')==='dark';
-  localStorage.setItem('caic-theme',dark?'light':'dark');
-  applyTheme(!dark);
-}
-(function(){applyTheme(localStorage.getItem('caic-theme')==='dark');})();
-// ─────────────────────────────────────────────────────
 const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const DSEM=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 let turmasCache=[],mfAlunoId=null;
@@ -687,7 +597,7 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 function fecharModal(id){document.getElementById(id).classList.remove('open')}
 async function loadStats(){const s=await api('GET','/stats');document.getElementById('st-total').textContent=s.total_ativos;document.getElementById('st-entrada').textContent=s.entradas_mes;document.getElementById('st-saida').textContent=s.saidas_mes;document.getElementById('st-turmas').textContent=s.total_turmas;document.getElementById('st-pcd').textContent=s.total_pcd;document.getElementById('st-mat').textContent=s.matutino;document.getElementById('st-ves').textContent=s.vespertino;}
 async function loadTurmasList(){turmasCache=await api('GET','/turmas');const dl=document.getElementById('turmas-list');dl.innerHTML=turmasCache.map(t=>`<option value="${t.nome}">`).join('');['fl-turma','fq-turma'].forEach(id=>{const sel=document.getElementById(id);const val=sel.value;const pre=id==='fl-turma'?'<option value="">Todas as turmas</option>':'<option value="">Selecione uma turma</option>';sel.innerHTML=pre+turmasCache.map(t=>`<option value="${t.nome}"${t.nome===val?'selected':''}>${t.nome} (${t.total})</option>`).join('');});}
-function showTab(tab,el){document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+tab).style.display='block';if(el)el.classList.add('active');if(tab==='lista'){loadTurmasList();renderLista();}if(tab==='turmas'){loadTurmasList();renderTurmas();}if(tab==='historico')renderHistorico();if(tab==='frequencia'){initFreq();renderFreqTurma();}if(tab==='calendario'){initCalendario();renderCalendario();}if(tab==='relatorio')renderRelatorio();}
+function showTab(tab,el){document.querySelectorAll('[id^="tab-"]').forEach(d=>d.style.display='none');document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+tab).style.display='block';if(el)el.classList.add('active');if(tab==='lista'){loadTurmasList();renderLista();}if(tab==='turmas'){loadTurmasList();renderTurmas();}if(tab==='historico')renderHistorico();if(tab==='feriados'){initFeriados();renderFeriados();}if(tab==='frequencia'){initFreq();carregarFeriados(new Date().getFullYear());renderFreqTurma();}if(tab==='relatorio')renderRelatorio();}
 async function cadastrar(){const nome=document.getElementById('f-nome').value.trim();if(!nome){toast('Informe o nome do aluno.');return;}await api('POST','/alunos',{nome,turma_nome:document.getElementById('f-turma').value.trim(),turno:document.getElementById('f-turno').value,data_nascimento:document.getElementById('f-nasc').value||null,cpf:document.getElementById('f-cpf').value.trim()||null,raca:document.getElementById('f-raca').value||null,sus:document.getElementById('f-sus').value.trim()||null,pcd:parseInt(document.getElementById('f-pcd').value),especificidade:document.getElementById('f-espec').value.trim()||null,apoio:document.getElementById('f-apoio').value.trim()||null,responsavel:document.getElementById('f-resp').value.trim()||null,telefone:document.getElementById('f-tel').value.trim()||null,endereco:document.getElementById('f-end').value.trim()||null,cidade:document.getElementById('f-cidade').value.trim()||null,cep:document.getElementById('f-cep').value.trim()||null,obs:document.getElementById('f-obs').value.trim()||null,ativo:1});toast(`Aluno "${nome}" cadastrado!`);limparForm();loadStats();loadTurmasList();}
 function limparForm(){['f-nome','f-turma','f-cpf','f-sus','f-resp','f-tel','f-end','f-cidade','f-cep','f-obs','f-espec','f-apoio'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});['f-turno','f-raca','f-pcd'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-nasc').value='';document.getElementById('fg-espec').style.display='none';document.getElementById('fg-apoio').style.display='none';}
 async function renderLista(){const busca=document.getElementById('busca').value;const turma=document.getElementById('fl-turma').value;const turno=document.getElementById('fl-turno').value;const status=document.getElementById('fl-status').value;let url=`/alunos?ativo=${status}`;if(busca)url+=`&busca=${encodeURIComponent(busca)}`;if(turma)url+=`&turma=${encodeURIComponent(turma)}`;if(turno)url+=`&turno=${encodeURIComponent(turno)}`;const alunos=await api('GET',url);const el=document.getElementById('lista-container');if(!alunos.length){el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div>Nenhum aluno encontrado.</div>';return;}el.innerHTML=alunos.map(a=>`<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det">${a.turma_nome||'Sem turma'} · ${a.turno||a.turma_turno||'—'}${a.telefone?' · '+a.telefone:''}${a.pcd?' · PCD':''}</div></div>${a.pcd?'<span class="badge badge-pcd">PCD</span>':''}<span class="badge ${a.ativo?'badge-ativo':'badge-inativo'}">${a.ativo?'Ativo':'Inativo'}</span><div class="aluno-btns"><button class="btn btn-edit" data-id="${a.id}" onclick="abrirEdicao(parseInt(this.dataset.id))">Editar</button>${a.ativo?`<button class="btn btn-danger" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="registrarSaida(parseInt(this.dataset.id),this.dataset.nome)">Saída</button>`:''}</div></div>`).join('');}
@@ -697,23 +607,21 @@ async function salvarEdicao(){const id=document.getElementById('e-id').value;awa
 function renderTurmas(){const grid=document.getElementById('turmas-grid');grid.innerHTML=turmasCache.map((t,i)=>`<div class="turma-card" data-idx="${i}"><div class="turma-card-nome">${t.nome}</div><div class="turma-card-info">${t.turno||'—'}</div><div class="turma-card-num">${t.total}</div></div>`).join('');grid.querySelectorAll('.turma-card').forEach(card=>{card.addEventListener('click',function(){const t=turmasCache[parseInt(this.dataset.idx)];verTurma(t.nome,this);});});document.getElementById('turma-detalhe').style.display='none';}
 async function verTurma(nome,card){document.querySelectorAll('.turma-card').forEach(c=>c.classList.remove('selected'));card.classList.add('selected');const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(nome)}&ativo=1`);document.getElementById('turma-detalhe-titulo').textContent=`${nome} — ${alunos.length} aluno(s)`;document.getElementById('turma-detalhe-lista').innerHTML=alunos.map(a=>`<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det">${a.data_nascimento?'Nasc: '+fmtData(a.data_nascimento):''}${a.telefone?' · '+a.telefone:''}${a.pcd?' · PCD':''}</div></div>${a.pcd?'<span class="badge badge-pcd">PCD</span>':''}</div>`).join('')||'<div class="empty">Nenhum aluno ativo.</div>';const det=document.getElementById('turma-detalhe');det.style.display='block';det.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function initFreq(){const agora=new Date();['fq-mes','mf-mes'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML=MESES.map((m,i)=>`<option value="${i}"${i===agora.getMonth()?'selected':''}>${m}</option>`).join('');});const anos=[];for(let y=agora.getFullYear()-1;y<=agora.getFullYear()+1;y++)anos.push(y);['fq-ano','mf-ano'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;sel.innerHTML=anos.map(y=>`<option value="${y}"${y===agora.getFullYear()?'selected':''}>${y}</option>`).join('');});}
-let diasNaoLetivosCache={};
-async function carregarDiasNaoLetivos(ano,mes){const k=`${ano}-${mes}`;if(diasNaoLetivosCache[k])return diasNaoLetivosCache[k];const rows=await api('GET',`/dias_nao_letivos?ano=${ano}&mes=${mes}`);const set=new Set((rows||[]).map(r=>r.data));diasNaoLetivosCache[k]=set;return set;}
-async function diasUteisLetivos(ano,mes){const naoLetivos=await carregarDiasNaoLetivos(ano,mes+1);const dias=[],total=new Date(ano,mes+1,0).getDate();for(let d=1;d<=total;d++){const dow=new Date(ano,mes,d).getDay();if(dow!==0&&dow!==6){const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;if(!naoLetivos.has(ds))dias.push(d);}}return dias;}
-function diasUteis(ano,mes){const dias=[],total=new Date(ano,mes+1,0).getDate();for(let d=1;d<=total;d++){const dow=new Date(ano,mes,d).getDay();if(dow!==0&&dow!==6)dias.push(d);}return dias;}
-function initCalendario(){const agora=new Date();const sel=document.getElementById('cal-mes');if(sel&&!sel.innerHTML){sel.innerHTML=MESES.map((m,i)=>`<option value="${i+1}"${i===agora.getMonth()?'selected':''}>${m}</option>`).join('');}const sela=document.getElementById('cal-ano');if(sela&&!sela.innerHTML){const anos=[];for(let y=agora.getFullYear()-1;y<=agora.getFullYear()+1;y++)anos.push(y);sela.innerHTML=anos.map(y=>`<option value="${y}"${y===agora.getFullYear()?'selected':''}>${y}</option>`).join('');}const dataEl=document.getElementById('cal-data');if(dataEl&&!dataEl.value)dataEl.value=agora.toISOString().split('T')[0];}
-async function adicionarDiaNaoLetivo(){const data=document.getElementById('cal-data').value;const tipo=document.getElementById('cal-tipo').value;const motivo=document.getElementById('cal-motivo').value.trim();if(!data){toast('Informe a data.');return;}await api('POST','/dias_nao_letivos',{data,tipo,motivo});diasNaoLetivosCache={};toast('Dia não letivo adicionado!');renderCalendario();}
-async function removerDiaNaoLetivo(data,motivo){if(!confirm(`Remover "${motivo||data}" do calendário?`))return;await fetch(`/api/dias_nao_letivos/${data}`,{method:'DELETE'});diasNaoLetivosCache={};toast('Removido.');renderCalendario();}
-const TIPO_LABEL={FERIADO:'Feriado',GREVE:'Greve',PONTO_FACULTATIVO:'Ponto Facultativo',RECESSO:'Recesso',OUTRO:'Outro'};
-const TIPO_COLOR={FERIADO:'var(--accent)',GREVE:'var(--purple)',PONTO_FACULTATIVO:'var(--blue)',RECESSO:'var(--green)',OUTRO:'var(--ink3)'};
-const TIPO_BG={FERIADO:'var(--accent-bg)',GREVE:'var(--purple-bg)',PONTO_FACULTATIVO:'var(--blue-bg)',RECESSO:'var(--green-bg)',OUTRO:'var(--paper2)'};
-async function renderCalendario(){const mes=parseInt(document.getElementById('cal-mes').value);const ano=parseInt(document.getElementById('cal-ano').value);const rows=await api('GET',`/dias_nao_letivos?ano=${ano}&mes=${mes}`);const el=document.getElementById('cal-lista');const totalDias=new Date(ano,mes,0).getDate();const diasUteisTotal=diasUteis(ano,mes-1).length;const impacto=rows?rows.length:0;if(!rows||!rows.length){el.innerHTML=`<div class="empty"><div class="empty-icon">✅</div><div>Nenhum dia não letivo em ${MESES[mes-1]} ${ano}</div><div style="font-size:12px;color:var(--ink3);margin-top:6px">${diasUteisTotal} dias letivos no mês</div></div>`;return;}const resumo=`<div style="background:var(--paper2);border:1px solid var(--paper3);border-radius:var(--radius-sm);padding:.75rem 1rem;margin-bottom:1rem;display:flex;gap:1rem;flex-wrap:wrap;font-size:13px"><span style="color:var(--ink2)">📅 <strong>${diasUteisTotal}</strong> dias úteis no mês</span><span style="color:var(--accent)">⚠️ <strong>${impacto}</strong> dia(s) não letivo(s)</span><span style="color:var(--green)">✓ <strong>${diasUteisTotal-impacto}</strong> dias letivos efetivos</span></div>`;el.innerHTML=resumo+rows.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--paper3)"><div style="background:${TIPO_BG[r.tipo]||'var(--paper2)'};border-radius:var(--radius-sm);padding:4px 10px;font-size:11px;font-weight:700;color:${TIPO_COLOR[r.tipo]||'var(--ink3)'};min-width:110px;text-align:center">${TIPO_LABEL[r.tipo]||r.tipo}</div><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--ink)">${fmtData(r.data)}</div><div style="font-size:12px;color:var(--ink3);margin-top:2px">${r.motivo||'—'}</div></div><button class="btn btn-danger" onclick="removerDiaNaoLetivo('${r.data}','${(r.motivo||r.data).replace(/'/g,"\\'")}')">Remover</button></div>`).join('');}
-async function renderFreqTurma(){const turma=document.getElementById('fq-turma').value;const mes=parseInt(document.getElementById('fq-mes').value);const ano=parseInt(document.getElementById('fq-ano').value);const el=document.getElementById('freq-container');if(!turma){el.innerHTML='<div class="card"><div class="empty"><div class="empty-icon">📅</div>Selecione uma turma.</div></div>';return;}const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(turma)}&ativo=1`);if(!alunos.length){el.innerHTML='<div class="card"><div class="empty">Nenhum aluno ativo nesta turma.</div></div>';return;}const dias=await diasUteisLetivos(ano,mes);const diasTotais=diasUteis(ano,mes).length;const diasNaoLet=diasTotais-dias.length;const naoLetivosBadge=diasNaoLet>0?`<div style="font-size:12px;color:var(--ink3);margin-bottom:.75rem;background:var(--paper2);border-radius:var(--radius-sm);padding:6px 10px">📅 <strong>${dias.length}</strong> dias letivos efetivos (${diasTotais} úteis − ${diasNaoLet} não letivos)</div>`:'';const rows=await Promise.all(alunos.map(async a=>{const freq=await api('GET',`/frequencia/${a.id}?ano=${ano}&mes=${mes+1}`);const p=dias.map(d=>`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`).filter(ds=>freq[ds]===1).length;const f=dias.map(d=>`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`).filter(ds=>freq[ds]===0).length;const pct=dias.length>0?Math.round((p/dias.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':' var(--accent)';return `<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det"><span style="color:var(--green);font-weight:600">${p}P</span> · <span style="color:var(--accent);font-weight:600">${f}F</span> · ${dias.length-p-f} sem registro</div></div><div style="text-align:right;min-width:48px"><div style="font-family:'DM Serif Display',serif;font-size:20px;color:${cor}">${pct}%</div></div><button class="btn btn-edit" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="abrirFreqAluno(parseInt(this.dataset.id),this.dataset.nome)">Ver dias</button></div>`;}));el.innerHTML=`<div class="card"><div class="card-title">${turma} · ${MESES[mes]} ${ano}</div>${naoLetivosBadge}${rows.join('')}</div>`;}
+function diasUteis(ano,mes){const dias=[],total=new Date(ano,mes+1,0).getDate();for(let d=1;d<=total;d++){const dow=new Date(ano,mes,d).getDay();const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;if(dow!==0&&dow!==6&&!feriadosCache[ds])dias.push(d);}return dias;}return dias;}
+async function renderFreqTurma(){const turma=document.getElementById('fq-turma').value;const mes=parseInt(document.getElementById('fq-mes').value);const ano=parseInt(document.getElementById('fq-ano').value);const el=document.getElementById('freq-container');if(!turma){el.innerHTML='<div class="card"><div class="empty"><div class="empty-icon">📅</div>Selecione uma turma.</div></div>';return;}const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(turma)}&ativo=1`);if(!alunos.length){el.innerHTML='<div class="card"><div class="empty">Nenhum aluno ativo nesta turma.</div></div>';return;}const dias=diasUteis(ano,mes);const rows=await Promise.all(alunos.map(async a=>{const freq=await api('GET',`/frequencia/${a.id}?ano=${ano}&mes=${mes+1}`);const p=Object.values(freq).filter(v=>v===1).length;const f=Object.values(freq).filter(v=>v===0).length;const pct=dias.length>0?Math.round((p/dias.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':'var(--accent)';return `<div class="aluno-row"><div class="avatar ${a.pcd?'pcd':''}">${iniciais(a.nome)}</div><div class="aluno-info"><div class="aluno-nome">${a.nome}</div><div class="aluno-det"><span style="color:var(--green);font-weight:600">${p}P</span> · <span style="color:var(--accent);font-weight:600">${f}F</span> · ${dias.length-p-f} sem registro</div></div><div style="text-align:right;min-width:48px"><div style="font-family:'DM Serif Display',serif;font-size:20px;color:${cor}">${pct}%</div></div><button class="btn btn-edit" data-id="${a.id}" data-nome="${a.nome.replace(/"/g,'&quot;')}" onclick="abrirFreqAluno(parseInt(this.dataset.id),this.dataset.nome)">Ver dias</button></div>`;}));el.innerHTML=`<div class="card"><div class="card-title">${turma} · ${MESES[mes]} ${ano}</div>${rows.join('')}</div>`;}
 async function abrirFreqAluno(id,nome){mfAlunoId=id;document.getElementById('mf-nome').textContent=nome;document.getElementById('mf-mes').value=document.getElementById('fq-mes').value;document.getElementById('mf-ano').value=document.getElementById('fq-ano').value;await renderModalFreq();document.getElementById('modal-freq').classList.add('open');}
-async function renderModalFreq(){if(!mfAlunoId)return;const mes=parseInt(document.getElementById('mf-mes').value);const ano=parseInt(document.getElementById('mf-ano').value);const freq=await api('GET',`/frequencia/${mfAlunoId}?ano=${ano}&mes=${mes+1}`);const naoLetivos=await carregarDiasNaoLetivos(ano,mes+1);const dias=diasUteis(ano,mes);const p=dias.filter(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;return freq[ds]===1;}).length;const f=dias.filter(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;return freq[ds]===0;}).length;const diasLetivos=dias.filter(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;return !naoLetivos.has(ds);});const pct=diasLetivos.length>0?Math.round((p/diasLetivos.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':' var(--accent)';const grid=dias.map(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const isNaoLetivo=naoLetivos.has(ds);const v=freq[ds];const bg=isNaoLetivo?'var(--paper3)':v===1?'var(--green-bg)':v===0?'var(--accent-bg)':'var(--paper2)';const lbl=isNaoLetivo?'NL':v===1?'P':v===0?'F':'—';const clr=isNaoLetivo?'var(--ink3)':v===1?'var(--green)':v===0?'var(--accent)':'var(--ink3)';const click=isNaoLetivo?'':` onclick="toggleFreq(${mfAlunoId},'${ds}',${v===null||v===undefined?'null':v})"`;return `<div class="dia-btn" style="background:${bg};opacity:${isNaoLetivo?0.5:1}"${click}><div style="font-size:10px;color:var(--ink3)">${DSEM[new Date(ano,mes,d).getDay()]}</div><div style="font-size:15px;font-weight:700;color:${clr}">${lbl}</div><div style="font-size:11px;color:var(--ink3)">${d}</div></div>`;}).join('');document.getElementById('mf-conteudo').innerHTML=`<div style="display:flex;gap:8px;margin-bottom:1rem"><div style="flex:1;background:var(--green-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--green)">${p}</div><div style="font-size:11px;color:var(--green);font-weight:600">Presenças</div></div><div style="flex:1;background:var(--accent-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--accent)">${f}</div><div style="font-size:11px;color:var(--accent);font-weight:600">Faltas</div></div><div style="flex:1;background:var(--paper2);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:${cor}">${pct}%</div><div style="font-size:11px;color:var(--ink3);font-weight:600">Frequência</div></div></div><div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Clique num dia: — → P → F → — · Dias <strong>NL</strong> = não letivos</div><div class="freq-grid">${grid}</div>`;}
+async function renderModalFreq(){if(!mfAlunoId)return;const mes=parseInt(document.getElementById('mf-mes').value);const ano=parseInt(document.getElementById('mf-ano').value);const freq=await api('GET',`/frequencia/${mfAlunoId}?ano=${ano}&mes=${mes+1}`);const dias=diasUteis(ano,mes);const p=Object.values(freq).filter(v=>v===1).length;const f=Object.values(freq).filter(v=>v===0).length;const pct=dias.length>0?Math.round((p/dias.length)*100):0;const cor=pct>=75?'var(--green)':pct>=50?'var(--blue)':'var(--accent)';const grid=dias.map(d=>{const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const v=freq[ds];const bg=v===1?'var(--green-bg)':v===0?'var(--accent-bg)':'var(--paper2)';const lbl=v===1?'P':v===0?'F':'—';const clr=v===1?'var(--green)':v===0?'var(--accent)':'var(--ink3)';return `<div class="dia-btn" style="background:${bg}" onclick="toggleFreq(${mfAlunoId},'${ds}',${v===null||v===undefined?'null':v})"><div style="font-size:10px;color:var(--ink3)">${DSEM[new Date(ano,mes,d).getDay()]}</div><div style="font-size:15px;font-weight:700;color:${clr}">${lbl}</div><div style="font-size:11px;color:var(--ink3)">${d}</div></div>`;}).join('');document.getElementById('mf-conteudo').innerHTML=`<div style="display:flex;gap:8px;margin-bottom:1rem"><div style="flex:1;background:var(--green-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--green)">${p}</div><div style="font-size:11px;color:var(--green);font-weight:600">Presenças</div></div><div style="flex:1;background:var(--accent-bg);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--accent)">${f}</div><div style="font-size:11px;color:var(--accent);font-weight:600">Faltas</div></div><div style="flex:1;background:var(--paper2);border-radius:var(--radius-sm);padding:10px;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:24px;color:${cor}">${pct}%</div><div style="font-size:11px;color:var(--ink3);font-weight:600">Frequência</div></div></div><div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Clique num dia: — → P → F → —</div><div class="freq-grid">${grid}</div>`;}
 async function toggleFreq(id,ds,atual){let novo;if(atual===null||atual===undefined||atual==='null')novo=1;else if(atual===1||atual==='1')novo=0;else novo=null;await api('POST','/frequencia',{aluno_id:id,data:ds,presente:novo});renderModalFreq();renderFreqTurma();}
 async function renderHistorico(){const rows=await api('GET','/historico');const el=document.getElementById('hist-container');if(!rows.length){el.innerHTML='<div class="empty"><div class="empty-icon">📅</div>Sem movimentações.</div>';return;}el.innerHTML=rows.map(h=>`<div class="log-row"><div class="log-dot ${h.tipo==='ENTRADA'?'E':h.tipo==='SAÍDA'?'S':'ED'}">${h.tipo==='ENTRADA'?'E':h.tipo==='SAÍDA'?'S':'ED'}</div><div class="log-body"><div class="log-name">${h.aluno_nome||'—'}</div><div class="log-meta">${h.tipo} · ${h.descricao||''}</div></div><div class="log-date">${fmtData(h.data)}</div></div>`).join('');}
 async function renderRelatorio(){const[stats,turmas]=await Promise.all([api('GET','/stats'),api('GET','/turmas')]);const agora=new Date();document.getElementById('rel-container').innerHTML=`<div class="card"><div class="card-title">${MESES[agora.getMonth()]} ${agora.getFullYear()}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.5rem"><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.total_ativos}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Alunos ativos</div></div><div style="background:var(--green-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--green)">${stats.matutino}</div><div style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase">Matutino</div></div><div style="background:var(--accent-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--accent)">${stats.vespertino}</div><div style="font-size:11px;color:var(--accent);font-weight:600;text-transform:uppercase">Vespertino</div></div><div style="background:var(--purple-bg);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--purple)">${stats.total_pcd}</div><div style="font-size:11px;color:var(--purple);font-weight:600;text-transform:uppercase">Alunos PCD</div></div><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.entradas_mes}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Entradas no mês</div></div><div style="background:var(--paper2);border-radius:var(--radius-sm);padding:1rem;text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:32px;color:var(--ink)">${stats.saidas_mes}</div><div style="font-size:11px;color:var(--ink3);font-weight:600;text-transform:uppercase">Saídas no mês</div></div></div><div class="sdiv">Alunos por turma</div>${turmas.map(t=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--paper3);font-size:13px"><span style="color:var(--ink2)">${t.nome} <span style="color:var(--ink3)">(${t.turno||'—'})</span></span><span style="font-weight:700;background:var(--paper2);padding:2px 10px;border-radius:99px;font-size:12px">${t.total} aluno${t.total!==1?'s':''}</span></div>`).join('')}</div>`;}
+
+let feriadosCache={};
+function initFeriados(){const sel=document.getElementById('fer-ano-filtro');const ano=new Date().getFullYear();sel.innerHTML=[ano-1,ano,ano+1].map(y=>`<option value="${y}"${y===ano?'selected':''}>${y}</option>`).join('');document.getElementById('fer-data').value=new Date().toISOString().split('T')[0];}
+async function renderFeriados(){const ano=document.getElementById('fer-ano-filtro').value;const lista=await api('GET',`/feriados?ano=${ano}`);feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);const el=document.getElementById('feriados-lista');if(!lista.length){el.innerHTML='<div class="empty"><div class="empty-icon">📅</div>Nenhum dia não letivo em '+ano+'.</div>';return;}const tLabel={feriado:'Feriado nacional',municipal:'Feriado municipal',recesso:'Recesso',ponto:'Ponto facultativo',evento:'Evento escolar',outro:'Outro'};const tColor={feriado:'var(--accent)',municipal:'var(--blue)',recesso:'var(--green)',ponto:'var(--ink3)',evento:'#6b3fa0',outro:'var(--ink3)'};el.innerHTML=lista.map(f=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--paper3)"><div style="min-width:90px;font-size:12px;font-weight:600;color:var(--ink)">${fmtData(f.data)}</div><div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--ink)">${f.descricao}</div><div style="font-size:11px;color:${tColor[f.tipo]||'var(--ink3)'};margin-top:2px;font-weight:500">${tLabel[f.tipo]||f.tipo}</div></div><button class="btn" style="color:var(--accent);border-color:var(--paper3);padding:4px 10px;font-size:12px" onclick="deletarFeriado('${f.data}','${f.descricao.replace(/'/g,"\\'")}')">Remover</button></div>`).join('');}
+async function cadastrarFeriado(){const data=document.getElementById('fer-data').value;const desc=document.getElementById('fer-desc').value.trim();const tipo=document.getElementById('fer-tipo').value;if(!data||!desc){toast('Preencha a data e a descrição.');return;}await api('POST','/feriados',{data,descricao:desc,tipo});document.getElementById('fer-desc').value='';toast('Dia não letivo cadastrado!');renderFeriados();}
+async function deletarFeriado(data,desc){if(!confirm(`Remover "${desc}" (${fmtData(data)})?`))return;await api('DELETE',`/feriados/${data}`);toast('Removido com sucesso.');renderFeriados();}
+async function carregarFeriados(ano){const lista=await api('GET',`/feriados?ano=${ano}`);feriadosCache={};lista.forEach(f=>feriadosCache[f.data]=f.descricao);return feriadosCache;}
+
 async function exportarExcel(){const alunos=await api('GET','/alunos?ativo=todos');if(!window.XLSX){toast('Biblioteca carregando...');return;}const wb=XLSX.utils.book_new();const data=[['Nome','Turma','Turno','Nascimento','CPF','Raça','SUS','PCD','Especificidade','Apoio','Responsável','Telefone','Endereço','Cidade','CEP','Status','Obs']];alunos.forEach(a=>data.push([a.nome,a.turma_nome||'',a.turno||a.turma_turno||'',fmtData(a.data_nascimento),a.cpf||'',a.raca||'',a.sus||'',a.pcd?'Sim':'Não',a.especificidade||'',a.apoio||'',a.responsavel||'',a.telefone||'',a.endereco||'',a.cidade||'',a.cep||'',a.ativo?'Ativo':'Inativo',a.obs||'']));const ws=XLSX.utils.aoa_to_sheet(data);ws['!cols']=[22,14,12,12,16,10,20,6,16,16,22,16,28,14,10,8,20].map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,ws,'Alunos');XLSX.writeFile(wb,`Alunos_CAIC_${new Date().toISOString().split('T')[0]}.xlsx`);toast('Excel exportado!');}
 loadStats();loadTurmasList();
 </script>
@@ -732,7 +640,6 @@ LOGIN_HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--ink:#1a1614;--ink3:#8a847e;--paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;--accent:#c8602a;--radius:14px;--radius-sm:10px}
-[data-theme="dark"]{--ink:#f0ece8;--ink3:#7a746e;--paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;--accent:#e8845a}
 body{font-family:'DM Sans',sans-serif;background:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
 .box{background:var(--paper);border-radius:var(--radius);padding:2.5rem 2rem;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .logo{font-family:'DM Serif Display',serif;font-size:26px;color:var(--ink);letter-spacing:-0.5px;margin-bottom:4px}
@@ -771,7 +678,6 @@ function setTipo(tipo,el){document.getElementById('tipo-input').value=tipo;docum
 const p=new URLSearchParams(window.location.search);
 if(p.get('erro')==='1')document.getElementById('erro').classList.add('show');
 if(p.get('tipo')==='professor'){document.getElementById('tipo-input').value='professor';document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===1));}
-(function(){if(localStorage.getItem('caic-theme')==='dark')document.documentElement.setAttribute('data-theme','dark');})();
 </script>
 </body></html>"""
 
@@ -817,9 +723,6 @@ PROFESSOR_HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--ink:#1a1614;--ink2:#4a4540;--ink3:#8a847e;--paper:#faf8f5;--paper2:#f2efe9;--paper3:#e8e3da;--accent:#c8602a;--accent-bg:#fdf2ec;--green:#2a6b4a;--green-bg:#edf6f1;--radius:14px;--radius-sm:10px}
-[data-theme="dark"]{--ink:#f0ece8;--ink2:#c4bdb6;--ink3:#7a746e;--paper:#1a1714;--paper2:#232017;--paper3:#2e2b24;--accent:#e8845a;--accent-bg:#2d1c12;--green:#4aaf78;--green-bg:#0e2318}
-.theme-toggle{position:fixed;top:14px;right:14px;background:var(--paper2);border:1px solid var(--paper3);border-radius:20px;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--ink2);font-family:'DM Sans',sans-serif;z-index:100;transition:all .2s}
-.theme-toggle:hover{background:var(--paper3)}
 body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);min-height:100vh;max-width:480px;margin:0 auto}
 .header{background:var(--ink);padding:1.25rem 1.25rem 1rem;top:0;z-index:10;position:relative}
 .header-title{font-family:'DM Serif Display',serif;font-size:20px;color:#faf8f5;letter-spacing:-0.3px}
@@ -873,7 +776,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);m
   <div class="header-turma" id="header-turma"></div>
   <a href="/logout" class="logout-btn">Sair</a>
 </div>
-<button class="theme-toggle" onclick="toggleTheme()" id="theme-btn-prof">🌙</button>
 <div class="screen active" id="screen-turmas">
   <div style="margin-bottom:.5rem;margin-top:.25rem">
     <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--ink)">Selecione sua turma</div>
@@ -889,7 +791,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);m
     <button class="date-btn" onclick="mudarDia(1)">›</button>
   </div>
   <div id="weekend-warn" class="weekend-warn">⚠️ Final de semana — tem certeza?</div>
-  <div id="nl-warn" class="weekend-warn" style="display:none;background:#fdf2ec;border-color:#c8602a;color:#7c2d12">🚫 Este dia está marcado como <strong>não letivo</strong> no calendário escolar. Tem certeza que deseja registrar frequência?</div>
   <div class="resumo">
     <div class="res-card"><div class="res-num" id="res-p" style="color:var(--green)">0</div><div class="res-label" style="color:var(--green)">Presentes</div></div>
     <div class="res-card"><div class="res-num" id="res-f" style="color:var(--accent)">0</div><div class="res-label" style="color:var(--accent)">Faltas</div></div>
@@ -909,19 +810,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--paper);color:var(--ink);m
 <div class="toast" id="toast"></div>
 <script>
 const DIAS=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
-// ── Dark mode ─────────────────────────────────────────
-function applyTheme(dark){
-  document.documentElement.setAttribute('data-theme',dark?'dark':'light');
-  const btn=document.getElementById('theme-btn-prof');
-  if(btn)btn.textContent=dark?'☀️':'🌙';
-}
-function toggleTheme(){
-  const dark=document.documentElement.getAttribute('data-theme')==='dark';
-  localStorage.setItem('caic-theme',dark?'light':'dark');
-  applyTheme(!dark);
-}
-(function(){applyTheme(localStorage.getItem('caic-theme')==='dark');})();
-// ─────────────────────────────────────────────────────
 const MESES_FULL=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 let turmaSel=null,alunosList=[],freqLocal={},dataAtual=new Date(),salvando=false;
 function iniciais(n){return n.split(' ').slice(0,2).map(x=>x[0]).join('').toUpperCase()}
@@ -975,11 +863,6 @@ async function carregarFreqDia(){
   const alunos=await api('GET',`/alunos?turma=${encodeURIComponent(turmaSel.nome)}&ativo=1`);
   alunosList=alunos||[];freqLocal={};
   const ds=dateStr(dataAtual);
-  // Check if today is a non-letivo day
-  const naoLetivos=await (async()=>{try{const rows=await api('GET',`/dias_nao_letivos?ano=${dataAtual.getFullYear()}&mes=${dataAtual.getMonth()+1}`);return new Set((rows||[]).map(r=>r.data));}catch{return new Set();}})();
-  const isNaoLetivo=naoLetivos.has(ds);
-  const nlWarn=document.getElementById('nl-warn');
-  if(isNaoLetivo){if(nlWarn)nlWarn.style.display='block';}else{if(nlWarn)nlWarn.style.display='none';}
   await Promise.all(alunosList.map(async a=>{
     const freq=await api('GET',`/frequencia/${a.id}?ano=${dataAtual.getFullYear()}&mes=${dataAtual.getMonth()+1}`);
     if(freq&&freq[ds]!==undefined&&freq[ds]!==null)freqLocal[a.id]=freq[ds];
@@ -1020,6 +903,32 @@ async function salvarFrequencia(){
 carregarTurmas();
 </script>
 </body></html>"""
+
+
+# ── FERIADOS API ──────────────────────────────────────────────────────
+
+@app.route('/api/feriados', methods=['GET','POST'])
+@requer_login
+def feriados_route():
+    if request.method == 'GET':
+        ano = request.args.get('ano', '')
+        if ano:
+            rows = q("SELECT * FROM feriados WHERE data LIKE %s ORDER BY data", (f"{ano}-%",))
+        else:
+            rows = q("SELECT * FROM feriados ORDER BY data")
+        return jsonify(rows)
+    d = request.json
+    db = get_db()
+    q("INSERT INTO feriados (data, descricao, tipo) VALUES (%s,%s,%s) ON CONFLICT (data) DO UPDATE SET descricao=EXCLUDED.descricao, tipo=EXCLUDED.tipo",
+      (d['data'], d['descricao'], d.get('tipo','feriado')), db=db)
+    return jsonify({'ok': True})
+
+@app.route('/api/feriados/<string:data_str>', methods=['DELETE'])
+@requer_admin
+def deletar_feriado_route(data_str):
+    db = get_db()
+    q("DELETE FROM feriados WHERE data=%s", (data_str,), db=db)
+    return jsonify({'ok': True})
 
 if __name__ == '__main__':
     init_db()
