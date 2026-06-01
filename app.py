@@ -5,7 +5,7 @@ Banco de dados: Supabase (PostgreSQL)
 Deploy: Render.com
 """
 
-import os, json, re
+import os, json, re, calendar
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string, g, session, redirect
 import psycopg
@@ -178,7 +178,8 @@ def stats():
     db   = get_db()
     agora = datetime.now()
     mes_ini = f"{agora.year}-{agora.month:02d}-01"
-    mes_fim = f"{agora.year}-{agora.month:02d}-31"
+    ultimo_dia = calendar.monthrange(agora.year, agora.month)[1]
+    mes_fim = f"{agora.year}-{agora.month:02d}-{ultimo_dia:02d}"
     return jsonify({
         'total_ativos': q("SELECT COUNT(*) as n FROM alunos WHERE ativo=1", db=db, one=True)['n'],
         'total_pcd':    q("SELECT COUNT(*) as n FROM alunos WHERE ativo=1 AND pcd=1", db=db, one=True)['n'],
